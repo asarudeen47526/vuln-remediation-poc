@@ -1,0 +1,7 @@
+# Install only the SDK for the provider you use, plus jsonschema + ansible.
+# (Installing all three is fine too.)
+anthropic>=0.40      # for LLM_PROVIDER=anthropic  (Claude)
+openai>=1.50         # for LLM_PROVIDER=openai     (GPT)
+google-genai>=1.0    # for LLM_PROVIDER=gemini     (Gemini)
+jsonschema>=4.0
+# ansible is installed separately (apt install ansible, or pip install ansible)

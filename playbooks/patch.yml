@@ -1,0 +1,91 @@
+---
+# Fixed, reviewed remediation playbook.
+# The agent only fills `pkg`, `health_url`, and `services_to_restart`.
+# It never generates tasks.
+# Flow: record pre-version -> patch -> restart services -> smoke test -> auto-rollback+restart on failure
+- name: Remediate vulnerability on target
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    pkg: ""
+    health_url: "http://localhost/health"
+    services_to_restart: ""          # comma-separated service names, e.g. "nginx,sshd"
+
+  tasks:
+    - name: Refuse to run without a package
+      ansible.builtin.fail:
+        msg: "No package specified (pass -e pkg=<name>)."
+      when: pkg | length == 0
+
+    - name: Record pre-patch version
+      ansible.builtin.command: "rpm -q {{ pkg }}"
+      register: pre_version
+      changed_when: false
+      failed_when: false
+
+    - name: Show pre-patch version
+      ansible.builtin.debug:
+        msg: "Pre-patch: {{ pre_version.stdout | default('not installed') }}"
+
+    - name: Remediate and validate
+      block:
+        - name: Update the affected package to its fixed version
+          ansible.builtin.dnf:
+            name: "{{ pkg }}"
+            state: latest
+          register: patch_result
+
+        - name: Restart affected services after patch
+          ansible.builtin.systemd:
+            name: "{{ item }}"
+            state: restarted
+          loop: "{{ services_to_restart.split(',') | select | list }}"
+          when: services_to_restart | length > 0
+          register: restart_result
+
+        - name: Smoke test - sudo still works
+          ansible.builtin.command: "sudo -n true"
+          changed_when: false
+
+        - name: Smoke test - application health endpoint returns 200
+          ansible.builtin.uri:
+            url: "{{ health_url }}"
+            status_code: 200
+          register: health
+          retries: 3
+          delay: 5
+          until: health.status == 200
+
+        - name: Confirm post-patch version
+          ansible.builtin.command: "rpm -q {{ pkg }}"
+          register: post_version
+          changed_when: false
+
+        - name: Show post-patch version
+          ansible.builtin.debug:
+            msg: "Post-patch: {{ post_version.stdout }}"
+
+      rescue:
+        - name: Roll back the last dnf transaction
+          ansible.builtin.command: "dnf -y history undo last"
+
+        - name: Restart affected services after rollback
+          ansible.builtin.systemd:
+            name: "{{ item }}"
+            state: restarted
+          loop: "{{ services_to_restart.split(',') | select | list }}"
+          when: services_to_restart | length > 0
+
+        - name: Confirm rollback version
+          ansible.builtin.command: "rpm -q {{ pkg }}"
+          register: rollback_version
+          changed_when: false
+
+        - name: Show rollback version
+          ansible.builtin.debug:
+            msg: "Rolled back to: {{ rollback_version.stdout }}"
+
+        - name: Report failure so the agent logs a rollback
+          ansible.builtin.fail:
+            msg: "Smoke test failed for {{ pkg }} - rolled back to {{ rollback_version.stdout }}."
