@@ -724,6 +724,140 @@ function actionsHtml(f) {
   return `${remBtn}${defBtn}${skipBtn}<span class="action-sep"></span>${rollBtn}`;
 }
 
+// ── Search / filter / view ─────────────────────────────────────────────────
+function onSearch(val) {
+  S.searchQuery = val.trim();
+  renderFindings();
+}
+
+function setSevFilter(sev) {
+  S.sevFilter = sev;
+  document.querySelectorAll('.sev-chip').forEach(c => {
+    c.classList.toggle('active', c.dataset.sev === sev);
+  });
+  renderFindings();
+}
+
+function setViewMode(grouped) {
+  S.groupedView = grouped;
+  document.getElementById('view-btn-grouped').classList.toggle('active', grouped);
+  document.getElementById('view-btn-flat').classList.toggle('active', !grouped);
+  renderFindings();
+}
+
+// ── Grouping ───────────────────────────────────────────────────────────────
+function groupByPackage(findings) {
+  const map = new Map();
+  for (const f of findings) {
+    const key = f.package + '||' + (f.fixed_version || '');
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(f);
+  }
+  const sevOrd = {CRITICAL:0, HIGH:1, MEDIUM:2, LOW:3};
+  return [...map.values()].sort((a, b) => {
+    const as = Math.min(...a.map(f => sevOrd[f.severity] ?? 9));
+    const bs = Math.min(...b.map(f => sevOrd[f.severity] ?? 9));
+    return as !== bs ? as - bs : b.length - a.length;
+  });
+}
+
+function groupCardHtml(group) {
+  const f0 = group[0];
+  const pkg = f0.package;
+  const installed = f0.installed_version || '?';
+  const fixed = group.map(f => f.fixed_version).filter(Boolean).sort().pop() || 'no fix';
+  const sevOrd = {CRITICAL:0, HIGH:1, MEDIUM:2, LOW:3};
+  const maxSev = group.reduce((m, f) => (sevOrd[f.severity]??9) < (sevOrd[m]??9) ? f.severity : m, 'LOW');
+  const sc = {CRITICAL:'critical',HIGH:'high',MEDIUM:'medium',LOW:'low'}[maxSev]||'low';
+  const allOpen = group.every(f => ['open','deferred','skipped'].includes(f.status));
+  const vulnFindings = group.filter(f => f.category === 'vulnerability');
+  const allReady = vulnFindings.length > 0 && vulnFindings.every(f => f.plan_status === 'ready');
+  const hasPending = group.some(f => f.plan_status === 'pending');
+  const remCount = group.filter(f => f.status === 'remediated').length;
+  const ids = group.map(f => f.id);
+
+  const cveRows = group.map(f => {
+    const fsc = {CRITICAL:'critical',HIGH:'high',MEDIUM:'medium',LOW:'low'}[f.severity]||'low';
+    const fstc = {open:'open',remediated:'remediated',deferred:'deferred',skipped:'skipped',rolled_back:'rolled-back'}[f.status]||'open';
+    let planIcon, piClass;
+    if (f.plan_status==='ready')   { planIcon='✓ Ready';  piClass='pi-ok'; }
+    else if (f.plan_status==='pending') { planIcon='⏳';   piClass='pi-pend'; }
+    else if (f.plan_status==='na') { planIcon='— NPT';    piClass='pi-na'; }
+    else                           { planIcon='⚠ Err';    piClass='pi-err'; }
+    return `<div class="cve-row" onclick="toggleCveDetail(${f.id})">
+      <span class="sev-badge sev-${fsc}">${f.severity}</span>
+      <span class="cve-id">${f.cve_id}</span>
+      <span class="cve-title-col">${esc(f.title||'')}</span>
+      <span class="${piClass}">${planIcon}</span>
+      <span class="status-badge status-${fstc}">${f.status.replace('_',' ')}</span>
+    </div>
+    <div class="cve-detail" id="detail-${f.id}">
+      <div class="card-cols" style="border:none">
+        <div class="card-col">${techColHtml(f)}</div>
+        <div class="card-col">${analysisColHtml(f)}</div>
+        <div class="card-col">${planColHtml(f)}</div>
+      </div>
+      <div style="display:flex;gap:8px;padding:8px 0 0;flex-wrap:wrap">
+        <button class="btn btn-success" style="font-size:12px;padding:4px 10px" ${f.status!=='open'||f.plan_status!=='ready'?'disabled':''} onclick="showRemediateModal(${f.id});event.stopPropagation()">🤖 Remediate this CVE</button>
+        <button class="btn btn-amber" style="font-size:12px;padding:4px 10px" ${!['open','deferred','skipped'].includes(f.status)?'disabled':''} onclick="deferFinding(${f.id});event.stopPropagation()">📋 Defer</button>
+        <button class="btn btn-ghost" style="font-size:12px;padding:4px 10px" ${!['open','deferred','skipped'].includes(f.status)?'disabled':''} onclick="skipFinding(${f.id});event.stopPropagation()">✗ Skip</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  return `<div class="group-card sev-border-${sc}">
+    <div class="group-hdr">
+      <span class="sev-badge sev-${sc}">${maxSev}</span>
+      <span class="group-pkg">${esc(pkg)}</span>
+      <span class="version-pill">${esc(installed)} → ${esc(fixed)}</span>
+      <span class="group-cnt">${group.length} CVE${group.length>1?'s':''}</span>
+      ${remCount>0?`<span class="group-cnt" style="color:var(--s-rem)">${remCount} remediated</span>`:''}
+      ${hasPending?'<span class="spinner"></span>':''}
+    </div>
+    <div class="group-cve-list">${cveRows}</div>
+    <div class="card-actions">
+      <button class="btn btn-success" ${!allOpen||!allReady?'disabled':''} onclick="remediateGroup(${JSON.stringify(ids)})">
+        🤖 Remediate All (${vulnFindings.length})
+      </button>
+      <button class="btn btn-amber" ${!allOpen?'disabled':''} onclick="deferGroup(${JSON.stringify(ids)})">📋 Defer All</button>
+      <span class="action-sep"></span>
+      <span class="group-foot-hint">1 Ansible run patches ${esc(pkg)} · fixes all ${group.length} CVE${group.length>1?'s':''}</span>
+    </div>
+  </div>`;
+}
+
+function toggleCveDetail(fid) {
+  const el = document.getElementById('detail-' + fid);
+  if (el) el.classList.toggle('open');
+}
+
+async function deferGroup(ids) {
+  for (const id of ids) {
+    try { await api('POST', `/findings/${id}/defer`); } catch {}
+  }
+  toast('ok', `${ids.length} finding(s) deferred`);
+  await refreshFindings();
+}
+
+async function remediateGroup(ids) {
+  if (!S.selectedAIT) return;
+  const rep = S.findings.find(f => ids.includes(f.id) && f.plan_status === 'ready' && f.plan);
+  if (!rep) return toast('err', 'No validated plan available in this group');
+  S.pendingGroupIds = ids;
+  S.pendingFindingId = null;
+  const p = rep.plan;
+  const cveList = S.findings.filter(f => ids.includes(f.id)).map(f => f.cve_id).join(', ');
+  document.getElementById('rem-plan-kv').innerHTML = `
+    <span class="k">Action</span><span class="v">${esc(p.action)}</span>
+    <span class="k">Package</span><span class="v">${esc(p.package)}</span>
+    <span class="k">Fixes CVEs</span><span class="v" style="word-break:break-all;font-size:12px">${esc(cveList)}</span>
+    <span class="k">Services to restart</span><span class="v">${esc(p.services_to_restart||'none')}</span>
+    <span class="k">Reboot required</span><span class="v">${p.reboot_required?'⚠ Yes':'No'}</span>
+    <span class="k">Reason</span><span class="v">${esc(p.reason||'—')}</span>`;
+  document.getElementById('rem-restore-text').textContent = p.restore_plan || 'dnf history undo last (automatic)';
+  openModal('modal-remediate');
+}
+
 // ── Actions ────────────────────────────────────────────────────────────────
 function showRemediateModal(fid) {
   const f = S.findings.find(x=>x.id===fid);
@@ -743,18 +877,29 @@ function showRemediateModal(fid) {
 
 async function confirmRemediation() {
   const fid = S.pendingFindingId;
-  if (!fid) return;
-  document.getElementById('btn-confirm-rem').disabled = true;
-  document.getElementById('btn-confirm-rem').innerHTML = '<span class="spinner"></span> Executing…';
+  const gids = S.pendingGroupIds;
+  if (!fid && (!gids || !gids.length)) return;
+  const btn = document.getElementById('btn-confirm-rem');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Executing…';
   try {
-    const r = await api('POST',`/findings/${fid}/remediate`);
+    let r;
+    if (gids && gids.length > 0) {
+      r = await api('POST', `/applications/${S.selectedAIT}/remediate-bulk`, { finding_ids: gids });
+    } else {
+      r = await api('POST', `/findings/${fid}/remediate`);
+    }
     closeModal();
-    toast(r.success?'ok':'err', r.success?'Remediation succeeded!':'Remediation failed — rolled back automatically');
+    const msg = r.success
+      ? (gids && gids.length > 1 ? `Remediation succeeded! ${r.remediated_count} CVEs fixed.` : 'Remediation succeeded!')
+      : 'Remediation failed — rolled back automatically';
+    toast(r.success ? 'ok' : 'err', msg);
     await refreshFindings();
-  } catch(e) { toast('err','Error: '+e.message); }
+  } catch(e) { toast('err', 'Error: ' + e.message); }
   finally {
-    document.getElementById('btn-confirm-rem').disabled = false;
-    document.getElementById('btn-confirm-rem').innerHTML = '✓ Approve &amp; Execute';
+    btn.disabled = false;
+    btn.innerHTML = '✓ Approve &amp; Execute';
+    S.pendingGroupIds = null;
   }
 }
 
