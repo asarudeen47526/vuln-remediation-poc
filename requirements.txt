@@ -1,7 +1,17 @@
-# Install only the SDK for the provider you use, plus jsonschema + ansible.
-# (Installing all three is fine too.)
-anthropic>=0.40      # for LLM_PROVIDER=anthropic  (Claude)
-openai>=1.50         # for LLM_PROVIDER=openai     (GPT)
-google-genai>=1.0    # for LLM_PROVIDER=gemini     (Gemini)
+# ── Web application ─────────────────────────────────────────────────────────
+fastapi>=0.111
+uvicorn[standard]>=0.29
+sqlalchemy>=2.0
+psycopg2-binary>=2.9
+python-multipart>=0.0.9
+
+# ── LLM providers (install only what you use) ────────────────────────────────
+anthropic>=0.40       # LLM_PROVIDER=anthropic  (Claude)
+openai>=1.50          # LLM_PROVIDER=openai     (GPT)
+google-genai>=1.0     # LLM_PROVIDER=gemini     (Gemini)
+
+# ── Safety gate ──────────────────────────────────────────────────────────────
 jsonschema>=4.0
-# ansible is installed separately (apt install ansible, or pip install ansible)
+
+# ansible is installed separately: pip install ansible
+#   or: dnf/apt install ansible

@@ -4,6 +4,8 @@ import os
 
 # Load .env from the project root automatically so scripts work when run
 # directly (python analyze.py) without pre-loading the environment.
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/vulndb")
+
 _env_file = os.path.join(os.path.dirname(__file__), ".env")
 if os.path.exists(_env_file):
     with open(_env_file, encoding="utf-8") as _fh:

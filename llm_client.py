@@ -86,7 +86,7 @@ def generate(system: str, user: str) -> str:
         model = _model()
         if model:
             cmd += ["--model", model]
-        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=120)
         if r.returncode != 0:
             raise RuntimeError(
                 f"claude CLI exited {r.returncode}: {r.stderr.strip() or r.stdout.strip()}"

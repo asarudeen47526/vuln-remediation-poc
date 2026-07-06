@@ -10,6 +10,7 @@ Usage:
     python analyze.py --pull                   # pull existing /tmp/trivy_scan.json from target
     python analyze.py --pull /path/on/target   # pull a specific remote report path
     python analyze.py report.json              # analyze an existing local Trivy JSON file
+    python analyze.py report.json --ait-id AIT-001  # analyze and store per-CVE results to DB
 
 Set JUMP_HOST=user@bastion in .env when the target is not directly reachable.
 Set REMOTE_REPORT_PATH=/tmp/trivy_scan.json if Trivy already runs on the target
@@ -145,6 +146,51 @@ def build_report(findings: list, by_sev: dict, fixable: list,
 
 
 # ---------------------------------------------------------------------------
+# Per-CVE extraction + DB persistence
+# ---------------------------------------------------------------------------
+
+def _extract_per_cve(text: str) -> dict[str, str]:
+    import re
+    per_cve: dict[str, str] = {}
+    parts = re.split(r'\n(?=###\s+CVE-[\w-]+)', text)
+    for part in parts:
+        m = re.match(r'###\s+(CVE-[\w-]+)', part.strip())
+        if m:
+            per_cve[m.group(1)] = part.strip()
+    return per_cve
+
+
+def store_to_db(findings: list[dict], analysis_text: str, ait_id: str) -> None:
+    """Write per-CVE analysis sections to the DB findings table."""
+    try:
+        os.environ.setdefault("DATABASE_URL",
+                              "postgresql://postgres:postgres@localhost:5432/vulndb")
+        from app.database import SessionLocal
+        from app import models
+        from app.crud import update_finding
+
+        per_cve = _extract_per_cve(analysis_text)
+        db = SessionLocal()
+        try:
+            updated = 0
+            for raw in findings:
+                cve = raw["cve"]
+                text = per_cve.get(cve, analysis_text)
+                rows = (db.query(models.Finding)
+                          .filter(models.Finding.ait_id == ait_id,
+                                  models.Finding.cve_id == cve)
+                          .all())
+                for row in rows:
+                    update_finding(db, row.id, analysis_md=text)
+                    updated += 1
+            print(f"  Stored analysis for {updated} finding(s) in DB (AIT {ait_id}).")
+        finally:
+            db.close()
+    except Exception as exc:  # noqa: BLE001
+        print(f"  [warn] Could not store analysis to DB: {exc}")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -192,6 +238,16 @@ def main() -> None:
     with open(out_path, "w", encoding="utf-8") as fh:
         fh.write(build_report(findings, by_sev, fixable, analysis, context_text))
     print(f"Report written: {out_path}")
+
+    # -- optionally persist per-CVE analysis to DB -------------------------
+    ait_id: str | None = None
+    args = sys.argv[1:]
+    for i, a in enumerate(args):
+        if a == "--ait-id" and i + 1 < len(args):
+            ait_id = args[i + 1]
+            break
+    if ait_id:
+        store_to_db(findings, analysis, ait_id)
 
 
 if __name__ == "__main__":

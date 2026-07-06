@@ -1,0 +1,967 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VulnGuard AI</title>
+<style>
+/* ── Variables ─────────────────────────────────────────────────────────── */
+:root {
+  --bg:#0f172a; --surface:#1e293b; --surface2:#273448; --border:#334155;
+  --text:#f1f5f9; --text2:#94a3b8; --text3:#64748b; --mono:#38bdf8;
+  --accent:#6366f1; --accent-h:#818cf8;
+  --c-crit:#ef4444; --c-crit-bg:rgba(239,68,68,.12);
+  --c-high:#f97316; --c-high-bg:rgba(249,115,22,.12);
+  --c-med:#eab308;  --c-med-bg:rgba(234,179,8,.12);
+  --c-low:#22c55e;  --c-low-bg:rgba(34,197,94,.12);
+  --s-open:#3b82f6; --s-rem:#22c55e; --s-def:#f59e0b;
+  --s-skip:#6b7280; --s-roll:#8b5cf6;
+  --sidebar:240px; --r:8px;
+}
+[data-theme="light"] {
+  --bg:#f1f5f9; --surface:#fff; --surface2:#f8fafc; --border:#e2e8f0;
+  --text:#0f172a; --text2:#475569; --text3:#94a3b8; --mono:#0369a1;
+}
+/* ── Reset / base ──────────────────────────────────────────────────────── */
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5}
+button{cursor:pointer;font:inherit;border:none;outline:none}
+input,select,textarea{font:inherit;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:var(--r);padding:8px 12px;width:100%}
+input:focus,select:focus{border-color:var(--accent);outline:2px solid rgba(99,102,241,.3)}
+a{color:var(--accent)}
+/* ── Layout ──────────────────────────────────────────────────────────── */
+.layout{display:flex;height:100vh;overflow:hidden}
+.sidebar{width:var(--sidebar);background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;overflow:hidden}
+.main{flex:1;overflow-y:auto;display:flex;flex-direction:column}
+/* ── Sidebar ─────────────────────────────────────────────────────────── */
+.sidebar-logo{padding:16px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border);font-weight:700;font-size:16px}
+.logo-icon{font-size:22px}
+.sidebar-section{padding:8px 12px 4px;font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em}
+.ait-list{flex:1;overflow-y:auto;padding:4px 8px}
+.ait-item{padding:10px;border-radius:var(--r);cursor:pointer;margin-bottom:4px;transition:background .15s}
+.ait-item:hover{background:var(--surface2)}
+.ait-item.active{background:rgba(99,102,241,.18);border:1px solid rgba(99,102,241,.35)}
+.ait-item-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:2px}
+.ait-id{font-weight:600;font-size:12px;color:var(--accent)}
+.ait-name{font-size:13px;color:var(--text);margin-bottom:4px}
+.ait-badges{display:flex;gap:4px;flex-wrap:wrap}
+.env-badge{font-size:10px;padding:1px 6px;border-radius:20px;font-weight:600}
+.env-production{background:rgba(34,197,94,.15);color:#22c55e}
+.env-staging{background:rgba(249,115,22,.15);color:#f97316}
+.env-development{background:rgba(99,102,241,.15);color:var(--accent)}
+.cnt-badge{font-size:10px;padding:1px 6px;border-radius:20px;font-weight:600}
+.cnt-crit{background:var(--c-crit-bg);color:var(--c-crit)}
+.cnt-high{background:var(--c-high-bg);color:var(--c-high)}
+.cnt-apv{background:rgba(245,158,11,.15);color:#f59e0b}
+.sidebar-footer{padding:12px;border-top:1px solid var(--border)}
+/* ── Header ──────────────────────────────────────────────────────────── */
+.app-header{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border);background:var(--surface);gap:12px;flex-shrink:0}
+.header-left h1{font-size:17px;font-weight:700}
+.header-sub{font-size:12px;color:var(--text2);margin-top:2px}
+.header-right{display:flex;align-items:center;gap:8px}
+/* ── Stats row ───────────────────────────────────────────────────────── */
+.stats-row{display:flex;gap:10px;padding:14px 20px;border-bottom:1px solid var(--border);flex-shrink:0;flex-wrap:wrap}
+.stat-tile{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:10px 14px;min-width:80px;flex:1}
+.stat-val{font-size:22px;font-weight:700;line-height:1}
+.stat-lbl{font-size:11px;color:var(--text2);margin-top:3px}
+.stat-crit .stat-val{color:var(--c-crit)}
+.stat-high .stat-val{color:var(--c-high)}
+.stat-open .stat-val{color:var(--s-open)}
+.stat-rem .stat-val{color:var(--s-rem)}
+.stat-def .stat-val{color:var(--s-def)}
+/* ── Tabs ────────────────────────────────────────────────────────────── */
+.tab-bar{display:flex;gap:0;padding:0 20px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0}
+.tab-btn{padding:10px 18px;color:var(--text2);border-bottom:2px solid transparent;font-weight:500;background:none;transition:all .15s}
+.tab-btn:hover{color:var(--text)}
+.tab-btn.active{color:var(--accent);border-bottom-color:var(--accent)}
+.tab-count{display:inline-block;background:var(--surface2);border-radius:20px;padding:0 7px;font-size:11px;margin-left:5px}
+.tab-btn.active .tab-count{background:rgba(99,102,241,.2);color:var(--accent)}
+/* ── Findings ────────────────────────────────────────────────────────── */
+.findings-wrap{padding:16px 20px;flex:1}
+.finding-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);margin-bottom:12px;overflow:hidden;transition:box-shadow .15s}
+.finding-card:hover{box-shadow:0 4px 16px rgba(0,0,0,.3)}
+.sev-border-critical{border-left:4px solid var(--c-crit)}
+.sev-border-high{border-left:4px solid var(--c-high)}
+.sev-border-medium{border-left:4px solid var(--c-med)}
+.sev-border-low{border-left:4px solid var(--c-low)}
+.card-hdr{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;gap:8px}
+.card-hdr-l{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sev-badge{font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;letter-spacing:.05em}
+.sev-critical{background:var(--c-crit-bg);color:var(--c-crit)}
+.sev-high{background:var(--c-high-bg);color:var(--c-high)}
+.sev-medium{background:var(--c-med-bg);color:var(--c-med)}
+.sev-low{background:var(--c-low-bg);color:var(--c-low)}
+.cve-id{font-weight:600;font-size:14px}
+.pkg-name{color:var(--text2)}
+.version-pill{font-size:11px;background:var(--surface2);border-radius:4px;padding:2px 8px;font-family:monospace;color:var(--mono)}
+.status-badge{font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;white-space:nowrap}
+.status-open{background:rgba(59,130,246,.15);color:var(--s-open)}
+.status-remediated{background:rgba(34,197,94,.15);color:var(--s-rem)}
+.status-deferred{background:rgba(245,158,11,.15);color:var(--s-def)}
+.status-skipped{background:rgba(107,114,128,.15);color:var(--s-skip)}
+.status-rolled-back{background:rgba(139,92,246,.15);color:var(--s-roll)}
+.card-title-row{padding:0 16px 10px;color:var(--text2);font-size:13px}
+/* ── Card columns ────────────────────────────────────────────────────── */
+.card-cols{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;border-top:1px solid var(--border)}
+.card-col{padding:12px 16px;border-right:1px solid var(--border)}
+.card-col:last-child{border-right:none}
+.col-label{font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px}
+.detail-grid{display:grid;grid-template-columns:auto 1fr;gap:4px 10px}
+.dk{color:var(--text3);font-size:12px;white-space:nowrap}
+.dv{font-size:12px;word-break:break-all}
+.mono{font-family:monospace;font-size:11px;color:var(--mono)}
+.text-muted{color:var(--text3)}
+.sev-text-critical{color:var(--c-crit)}
+.sev-text-high{color:var(--c-high)}
+.sev-text-medium{color:var(--c-med)}
+.sev-text-low{color:var(--c-low)}
+.plan-loading{color:var(--text2);font-size:13px;display:flex;align-items:center;gap:8px;padding:8px 0}
+.plan-error{color:var(--c-high);font-size:12px}
+.restore-box{margin-top:10px;background:rgba(139,92,246,.08);border:1px solid rgba(139,92,246,.25);border-radius:6px;padding:8px 10px;font-size:12px;color:var(--text2)}
+.restore-lbl{font-weight:600;color:#8b5cf6;display:block;margin-bottom:3px}
+.analysis-md{font-size:12px;color:var(--text2);line-height:1.6;max-height:160px;overflow-y:auto}
+.no-data{font-size:12px;color:var(--text3);font-style:italic}
+/* ── Card actions ────────────────────────────────────────────────────── */
+.card-actions{display:flex;gap:8px;padding:10px 16px;border-top:1px solid var(--border);flex-wrap:wrap;align-items:center;background:rgba(0,0,0,.12)}
+.action-sep{flex:1}
+/* ── Buttons ─────────────────────────────────────────────────────────── */
+.btn{display:inline-flex;align-items:center;gap:5px;padding:6px 14px;border-radius:var(--r);font-size:13px;font-weight:500;transition:all .15s;white-space:nowrap}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover:not(:disabled){background:var(--accent-h)}
+.btn-success{background:#166534;color:#86efac;border:1px solid #166534}
+.btn-success:hover:not(:disabled){background:#15803d}
+.btn-amber{background:#78350f;color:#fde68a;border:1px solid #78350f}
+.btn-amber:hover:not(:disabled){background:#92400e}
+.btn-ghost{background:transparent;color:var(--text2);border:1px solid var(--border)}
+.btn-ghost:hover:not(:disabled){background:var(--surface2);color:var(--text)}
+.btn-warn{background:#713f12;color:#fde68a;border:1px solid #92400e}
+.btn-warn:hover:not(:disabled){background:#92400e}
+.btn-danger{background:#7f1d1d;color:#fca5a5;border:1px solid #7f1d1d}
+.btn-danger:hover:not(:disabled){background:#991b1b}
+.btn-outline{background:transparent;color:var(--text);border:1px solid var(--border)}
+.btn-outline:hover:not(:disabled){background:var(--surface2)}
+.btn-icon{background:transparent;color:var(--text2);padding:6px 10px;border-radius:var(--r);border:1px solid var(--border)}
+.btn-icon:hover{color:var(--text);background:var(--surface2)}
+.notif-btn{position:relative;padding:6px 10px;border-radius:var(--r);border:1px solid var(--border);cursor:pointer;background:transparent;color:var(--text2);display:flex;align-items:center;gap:4px}
+.notif-btn:hover{background:var(--surface2);color:var(--text)}
+.notif-n{background:var(--c-crit);color:#fff;font-size:10px;font-weight:700;padding:1px 5px;border-radius:20px;min-width:18px;text-align:center}
+.link-btn{background:none;border:none;color:var(--accent);cursor:pointer;font-size:12px;padding:0;text-decoration:underline}
+/* ── Modal ───────────────────────────────────────────────────────────── */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(2px);z-index:100;display:flex;align-items:center;justify-content:center;padding:20px}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:12px;width:100%;max-width:600px;max-height:90vh;overflow:hidden;display:flex;flex-direction:column;animation:modalIn .15s ease}
+.modal-lg{max-width:720px}
+@keyframes modalIn{from{transform:scale(.95);opacity:0}to{transform:scale(1);opacity:1}}
+.modal-hdr{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border)}
+.modal-hdr h2{font-size:16px;font-weight:700}
+.close-btn{background:none;color:var(--text2);font-size:18px;padding:2px 8px;border-radius:4px}
+.close-btn:hover{background:var(--surface2);color:var(--text)}
+.modal-body{padding:20px;overflow-y:auto;flex:1}
+.modal-foot{display:flex;gap:8px;justify-content:flex-end;padding:14px 20px;border-top:1px solid var(--border)}
+/* ── Forms ───────────────────────────────────────────────────────────── */
+.form-row{margin-bottom:14px}
+.form-row label{display:block;font-size:12px;font-weight:600;color:var(--text2);margin-bottom:5px}
+.form-row input,.form-row select{width:100%}
+/* ── Plan sections in modal ──────────────────────────────────────────── */
+.plan-section{background:var(--surface2);border:1px solid var(--border);border-radius:var(--r);padding:14px;margin-bottom:14px}
+.plan-section h3{font-size:13px;font-weight:700;margin-bottom:10px;display:flex;align-items:center;gap:6px}
+.plan-kv{display:grid;grid-template-columns:130px 1fr;gap:6px 10px;font-size:13px}
+.plan-kv .k{color:var(--text3)}
+.plan-kv .v{font-weight:500}
+.restore-section{background:rgba(139,92,246,.08);border:1px solid rgba(139,92,246,.3);border-radius:var(--r);padding:14px;margin-bottom:14px}
+.restore-section h3{color:#8b5cf6}
+.warn-box{background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.3);border-radius:var(--r);padding:12px;font-size:13px;color:#fde68a;display:flex;gap:8px;margin-bottom:14px}
+.info-box{background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.3);border-radius:var(--r);padding:12px;font-size:13px;color:#93c5fd;display:flex;gap:8px;margin-bottom:14px}
+/* ── Upload ──────────────────────────────────────────────────────────── */
+.upload-zone{border:2px dashed var(--border);border-radius:var(--r);padding:30px;text-align:center;cursor:pointer;transition:all .15s;margin-bottom:12px}
+.upload-zone:hover,.upload-zone.drag{border-color:var(--accent);background:rgba(99,102,241,.05)}
+.upload-icon{font-size:32px;margin-bottom:8px}
+.upload-hint{color:var(--text3);font-size:12px;margin-top:4px}
+.file-chip{display:inline-flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:4px 12px;font-size:12px}
+/* ── Approval item ───────────────────────────────────────────────────── */
+.apv-item{background:var(--surface2);border:1px solid var(--border);border-radius:var(--r);padding:12px;margin-bottom:10px}
+.apv-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.apv-status{font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px}
+.apv-pending{background:rgba(245,158,11,.15);color:#f59e0b}
+.apv-approved{background:rgba(34,197,94,.15);color:#22c55e}
+.apv-rejected{background:rgba(239,68,68,.15);color:#ef4444}
+/* ── Empty states ────────────────────────────────────────────────────── */
+.empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;color:var(--text3);text-align:center}
+.empty-icon{font-size:48px;margin-bottom:12px}
+.empty-title{font-size:16px;font-weight:600;color:var(--text2);margin-bottom:6px}
+.empty-sub{font-size:13px}
+/* ── Spinner ─────────────────────────────────────────────────────────── */
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+/* ── Toast ───────────────────────────────────────────────────────────── */
+.toast-wrap{position:fixed;bottom:20px;right:20px;z-index:200;display:flex;flex-direction:column;gap:8px}
+.toast{padding:12px 16px;border-radius:var(--r);font-size:13px;display:flex;align-items:center;gap:8px;animation:toastIn .2s ease;box-shadow:0 4px 12px rgba(0,0,0,.4);max-width:340px}
+.toast-ok{background:#166534;color:#86efac;border:1px solid #15803d}
+.toast-err{background:#7f1d1d;color:#fca5a5;border:1px solid #991b1b}
+.toast-info{background:#1e3a5f;color:#93c5fd;border:1px solid #1d4ed8}
+@keyframes toastIn{from{transform:translateX(20px);opacity:0}to{transform:none;opacity:1}}
+/* ── Misc ────────────────────────────────────────────────────────────── */
+.hidden{display:none!important}
+.sep{height:1px;background:var(--border);margin:12px 0}
+.text-sm{font-size:12px;color:var(--text2)}
+/* ── Markdown rendering ──────────────────────────────────────────────── */
+.md-h3 { display:block; font-size:13px; margin-top:8px; margin-bottom:4px; color:var(--text); }
+.md-h2 { display:block; font-size:14px; margin-top:10px; margin-bottom:5px; color:var(--text); }
+.md-code { font-family:monospace; font-size:11px; background:var(--surface2); padding:1px 4px; border-radius:3px; color:var(--mono); }
+.md-ul { margin:4px 0 4px 16px; padding:0; }
+.md-ul li { margin-bottom:2px; }
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-logo"><span class="logo-icon">🛡</span>VulnGuard AI</div>
+    <div class="sidebar-section">Applications</div>
+    <div class="ait-list" id="ait-list"></div>
+    <div class="sidebar-footer">
+      <button class="btn btn-outline" style="width:100%;justify-content:center" onclick="openModal('modal-create-ait')">+ New Application</button>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <div class="main">
+    <div class="app-header">
+      <div class="header-left">
+        <h1 id="ait-title">Select an Application</h1>
+        <div class="header-sub" id="ait-sub"></div>
+      </div>
+      <div class="header-right">
+        <button class="btn btn-primary" id="btn-import" disabled onclick="openModal('modal-import')">↑ Import Scan</button>
+        <button class="btn btn-outline" id="btn-gen-plans" disabled onclick="generateAllPlans()" title="Generate remediation plans for all open vulnerability findings">⚙ Generate Plans</button>
+        <button class="btn btn-outline" id="btn-analyze" disabled onclick="openModal('modal-analyze')">🔬 Analyze</button>
+        <button class="btn-icon" onclick="toggleTheme()" title="Toggle theme">◑</button>
+        <button class="notif-btn" onclick="openPendingApprovals()">🔔<span class="notif-n" id="notif-n">0</span></button>
+      </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats-row">
+      <div class="stat-tile"><div class="stat-val" id="s-total">—</div><div class="stat-lbl">Total</div></div>
+      <div class="stat-tile stat-crit"><div class="stat-val" id="s-critical">—</div><div class="stat-lbl">Critical</div></div>
+      <div class="stat-tile stat-high"><div class="stat-val" id="s-high">—</div><div class="stat-lbl">High</div></div>
+      <div class="stat-tile stat-open"><div class="stat-val" id="s-open">—</div><div class="stat-lbl">Open</div></div>
+      <div class="stat-tile stat-rem"><div class="stat-val" id="s-remediated">—</div><div class="stat-lbl">Remediated</div></div>
+      <div class="stat-tile stat-def"><div class="stat-val" id="s-deferred">—</div><div class="stat-lbl">Deferred</div></div>
+      <div class="stat-tile"><div class="stat-val" id="s-npts">—</div><div class="stat-lbl">NPTs</div></div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tab-bar">
+      <button class="tab-btn active" id="tab-vulnerability" onclick="switchTab('vulnerability')">
+        Vulnerabilities <span class="tab-count" id="cnt-vuln">0</span>
+      </button>
+      <button class="tab-btn" id="tab-npt" onclick="switchTab('npt')">
+        NPTs <span class="tab-count" id="cnt-npt">0</span>
+      </button>
+    </div>
+
+    <!-- Findings -->
+    <div class="findings-wrap" id="findings-wrap">
+      <div class="empty-state">
+        <div class="empty-icon">🛡</div>
+        <div class="empty-title">Select an Application</div>
+        <div class="empty-sub">Choose an AIT from the sidebar to view its vulnerabilities</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════  MODALS  ════════════════════════════════════════ -->
+<div class="overlay hidden" id="overlay" onclick="overlayClick(event)">
+
+  <!-- Create AIT -->
+  <div class="modal hidden" id="modal-create-ait">
+    <div class="modal-hdr"><h2>New Application</h2><button class="close-btn" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <form id="form-ait" onsubmit="createAIT(event)">
+        <div class="form-row"><label>AIT ID *</label><input name="ait_id" placeholder="AIT-003" required></div>
+        <div class="form-row"><label>Application Name *</label><input name="name" placeholder="web-server-prod" required></div>
+        <div class="form-row"><label>Owner Name</label><input name="owner_name" placeholder="Jane Smith"></div>
+        <div class="form-row"><label>Owner Email</label><input name="owner_email" type="email" placeholder="owner@accenture.com"></div>
+        <div class="form-row"><label>Environment</label><select name="environment"><option value="production">Production</option><option value="staging">Staging</option><option value="development">Development</option></select></div>
+        <div class="form-row"><label>Host / IP</label><input name="host" placeholder="172.16.0.9"></div>
+        <div class="modal-foot"><button type="button" class="btn btn-ghost" onclick="closeModal()">Cancel</button><button type="submit" class="btn btn-primary">Create</button></div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Import Scan -->
+  <div class="modal hidden" id="modal-import">
+    <div class="modal-hdr"><h2>Import Vulnerability Scan</h2><button class="close-btn" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <p class="text-sm" style="margin-bottom:14px">Upload a Trivy JSON report for <strong id="import-ait-label"></strong></p>
+      <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()" ondragover="event.preventDefault();this.classList.add('drag')" ondragleave="this.classList.remove('drag')" ondrop="handleDrop(event)">
+        <div class="upload-icon">📁</div>
+        <div>Click or drag a Trivy JSON file here</div>
+        <div class="upload-hint">Output of: trivy fs / trivy image --format json</div>
+      </div>
+      <input type="file" id="file-input" accept=".json" style="display:none" onchange="handleFile(event)">
+      <div id="file-chip-wrap" class="hidden">
+        <span class="file-chip">📄 <span id="file-chip-name"></span> <button onclick="clearFile()" style="background:none;color:var(--text3);margin-left:4px">✕</button></span>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" id="btn-import-submit" disabled onclick="importScan()">Import &amp; Analyze</button>
+    </div>
+  </div>
+
+  <!-- Remediate Confirm -->
+  <div class="modal modal-lg hidden" id="modal-remediate">
+    <div class="modal-hdr"><h2>Confirm Remediation</h2><button class="close-btn" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="plan-section">
+        <h3>🔧 Remediation Plan</h3>
+        <div class="plan-kv" id="rem-plan-kv"></div>
+      </div>
+      <div class="restore-section">
+        <h3>↩ Restoration Plan <span style="font-size:12px;font-weight:400;color:var(--text2)">(auto-executed if smoke test fails)</span></h3>
+        <div id="rem-restore-text" style="font-size:13px;color:var(--text2);line-height:1.6"></div>
+      </div>
+      <div class="warn-box">⚠ Clicking <strong>Approve &amp; Execute</strong> is the human-approval step. The Ansible playbook will patch the package, restart affected services, run a smoke test, and roll back automatically if the smoke test fails.</div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-success" id="btn-confirm-rem" onclick="confirmRemediation()">✓ Approve &amp; Execute</button>
+    </div>
+  </div>
+
+  <!-- Rollback Request -->
+  <div class="modal modal-lg hidden" id="modal-rollback-req">
+    <div class="modal-hdr"><h2>Request Rollback</h2><button class="close-btn" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="restore-section">
+        <h3>↩ Restoration Plan</h3>
+        <div id="rb-restore-text" style="font-size:13px;color:var(--text2);line-height:1.6"></div>
+      </div>
+      <div class="warn-box">🔐 Rollback requires AIT owner approval. Submit the request, then approve it below (or email the approval link to the owner).</div>
+      <div class="form-row"><label>Approver Email (optional)</label><input type="email" id="rb-approver-email" placeholder="ait-owner@accenture.com"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-warn" onclick="submitRollbackRequest()">Send Approval Request</button>
+    </div>
+  </div>
+
+  <!-- Approval Management -->
+  <div class="modal modal-lg hidden" id="modal-approval">
+    <div class="modal-hdr"><h2>Rollback Approval</h2><button class="close-btn" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div id="apv-detail-block"></div>
+      <div class="warn-box">⚠ Approving will execute a rollback (<code>dnf history undo last</code>) on the target system. This action is recorded in the audit log.</div>
+      <div class="form-row"><label>Notes (optional)</label><input type="text" id="apv-notes" placeholder="Approved — service degraded post-patch"></div>
+      <div class="form-row"><label>Your email (for audit trail)</label><input type="email" id="apv-email" placeholder="approver@accenture.com"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal()">Close</button>
+      <button class="btn btn-danger" onclick="handleApproval('reject')">✗ Reject Rollback</button>
+      <button class="btn btn-warn" onclick="handleApproval('approve')">✓ Approve Rollback</button>
+    </div>
+  </div>
+
+  <!-- Pending Approvals List -->
+  <div class="modal modal-lg hidden" id="modal-apv-list">
+    <div class="modal-hdr"><h2>Pending Approvals</h2><button class="close-btn" onclick="closeModal()">✕</button></div>
+    <div class="modal-body" id="apv-list-body"><div class="empty-state" style="padding:30px"><div class="empty-icon">✅</div><div class="empty-title">No pending approvals</div></div></div>
+  </div>
+
+  <!-- Analyze modal -->
+  <div class="modal hidden" id="modal-analyze">
+    <div class="modal-hdr"><h2>Agent Analysis</h2><button class="close-btn" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <p class="text-sm" style="margin-bottom:14px">Generate or import AI risk analysis for <strong id="analyze-ait-label"></strong></p>
+      <div class="plan-section">
+        <h3 style="font-size:13px;margin-bottom:8px">Option A — Run Fresh Analysis</h3>
+        <p class="text-sm" style="margin-bottom:10px">Calls the LLM to analyze all findings. Takes ~30 seconds.</p>
+        <button class="btn btn-primary" onclick="runAnalysis()">🤖 Run Analysis Now</button>
+      </div>
+      <div class="plan-section" style="margin-top:12px">
+        <h3 style="font-size:13px;margin-bottom:8px">Option B — Import Existing Report</h3>
+        <p class="text-sm" style="margin-bottom:10px">Upload a <code>vuln_analysis_*.md</code> file generated by <code>analyze.py</code>.</p>
+        <div class="upload-zone" onclick="document.getElementById('analysis-file-input').click()">
+          <div class="upload-icon">📄</div>
+          <div>Click to select an analysis .md file</div>
+        </div>
+        <input type="file" id="analysis-file-input" accept=".md" style="display:none" onchange="handleAnalysisFile(event)">
+        <div id="analysis-file-chip" class="hidden" style="margin-top:8px">
+          <span class="file-chip">📄 <span id="analysis-file-name"></span></span>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal()">Close</button>
+      <button class="btn btn-primary hidden" id="btn-import-analysis" onclick="importAnalysis()">Import Report</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- Toasts -->
+<div class="toast-wrap" id="toast-wrap"></div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+const S = {
+  apps: [], selectedAIT: null, findings: [], stats: {},
+  activeTab: 'vulnerability', pendingFindingId: null, pendingToken: null,
+  pollTimer: null, importFile: null,
+};
+
+// ── API ────────────────────────────────────────────────────────────────────
+async function api(method, path, body) {
+  const opts = { method, headers: {'Content-Type':'application/json'} };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const res = await fetch('/api/v1' + path, opts);
+  if (!res.ok) {
+    let msg = res.statusText;
+    try { const j = await res.json(); msg = j.detail || JSON.stringify(j); } catch {}
+    throw new Error(msg);
+  }
+  if (res.status === 204) return null;
+  return res.json();
+}
+
+async function apiUpload(path, file) {
+  const fd = new FormData();
+  fd.append('file', file);
+  const res = await fetch('/api/v1' + path, {method:'POST', body:fd});
+  if (!res.ok) {
+    let msg = res.statusText;
+    try { const j = await res.json(); msg = j.detail || JSON.stringify(j); } catch {}
+    throw new Error(msg);
+  }
+  return res.json();
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────
+async function init() {
+  try { S.apps = await api('GET','/applications'); renderSidebar(); } catch(e) {}
+}
+
+// ── Sidebar ────────────────────────────────────────────────────────────────
+function renderSidebar() {
+  const el = document.getElementById('ait-list');
+  if (!S.apps.length) { el.innerHTML='<div class="text-sm" style="padding:12px;color:var(--text3)">No applications yet</div>'; return; }
+  el.innerHTML = S.apps.map(a => {
+    const st = a.stats || {};
+    const active = S.selectedAIT === a.ait_id ? ' active' : '';
+    return `<div class="ait-item${active}" onclick="selectAIT('${a.ait_id}')">
+      <div class="ait-item-top"><span class="ait-id">${a.ait_id}</span><span class="env-badge env-${a.environment}">${a.environment}</span></div>
+      <div class="ait-name">${a.name}</div>
+      <div class="ait-badges">
+        ${st.critical?`<span class="cnt-badge cnt-crit">${st.critical} crit</span>`:''}
+        ${st.high?`<span class="cnt-badge cnt-high">${st.high} high</span>`:''}
+        ${st.pending_approvals?`<span class="cnt-badge cnt-apv">⏳${st.pending_approvals}</span>`:''}
+      </div>
+    </div>`;
+  }).join('');
+  updateNotifBadge();
+}
+
+function updateNotifBadge() {
+  const n = S.apps.reduce((s,a)=>s+(a.stats?.pending_approvals||0),0);
+  document.getElementById('notif-n').textContent = n;
+}
+
+// ── AIT selection ──────────────────────────────────────────────────────────
+async function selectAIT(aitId) {
+  S.selectedAIT = aitId;
+  renderSidebar();
+  const app = S.apps.find(a=>a.ait_id===aitId);
+  document.getElementById('ait-title').textContent = app ? `${app.ait_id} — ${app.name}` : aitId;
+  document.getElementById('ait-sub').textContent = app ? `${app.environment}${app.host?' · '+app.host:''}${app.owner_name?' · '+app.owner_name:''}` : '';
+  document.getElementById('btn-import').disabled = false;
+  document.getElementById('btn-gen-plans').disabled = false;
+  document.getElementById('btn-analyze').disabled = false;
+  document.getElementById('import-ait-label').textContent = aitId;
+  document.getElementById('analyze-ait-label').textContent = aitId;
+  await refreshFindings();
+  startPoll();
+}
+
+async function refreshFindings() {
+  if (!S.selectedAIT) return;
+  try {
+    const [findings, stats] = await Promise.all([
+      api('GET',`/applications/${S.selectedAIT}/findings`),
+      api('GET',`/applications/${S.selectedAIT}/stats`),
+    ]);
+    S.findings = findings; S.stats = stats;
+    renderStats(); renderFindings();
+    // Refresh sidebar counts
+    S.apps = await api('GET','/applications');
+    renderSidebar();
+  } catch(e) { toast('err','Failed to load: '+e.message); }
+}
+
+// ── Stats ──────────────────────────────────────────────────────────────────
+function renderStats() {
+  const m = {'total':'s-total','critical':'s-critical','high':'s-high','open':'s-open','remediated':'s-remediated','deferred':'s-deferred','npts':'s-npts'};
+  for (const [k,id] of Object.entries(m)) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = S.stats[k] ?? 0;
+  }
+  document.getElementById('cnt-vuln').textContent = S.stats.vulnerabilities ?? 0;
+  document.getElementById('cnt-npt').textContent = S.stats.npts ?? 0;
+}
+
+// ── Tabs ───────────────────────────────────────────────────────────────────
+function switchTab(tab) {
+  S.activeTab = tab;
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('tab-'+tab).classList.add('active');
+  renderFindings();
+}
+
+// ── Findings ───────────────────────────────────────────────────────────────
+function renderFindings() {
+  const wrap = document.getElementById('findings-wrap');
+  const list = S.findings.filter(f=>f.category===S.activeTab);
+  if (!S.selectedAIT) { wrap.innerHTML=emptyHtml('🛡','Select an Application','Choose an AIT from the sidebar'); return; }
+  if (!list.length) {
+    const lbl = S.activeTab==='npt'?'Non-Patchable Treatments':'Vulnerabilities';
+    wrap.innerHTML=emptyHtml('✅','No '+lbl,'Import a scan to populate this list'); return;
+  }
+  wrap.innerHTML = list.map(cardHtml).join('');
+}
+
+function emptyHtml(icon,title,sub) {
+  return `<div class="empty-state"><div class="empty-icon">${icon}</div><div class="empty-title">${title}</div><div class="empty-sub">${sub}</div></div>`;
+}
+
+function cardHtml(f) {
+  const sc = {CRITICAL:'critical',HIGH:'high',MEDIUM:'medium',LOW:'low'}[f.severity]||'low';
+  const stc = {open:'open',remediated:'remediated',deferred:'deferred',skipped:'skipped',rolled_back:'rolled-back'}[f.status]||'open';
+  return `<div class="finding-card sev-border-${sc}" id="card-${f.id}">
+    <div class="card-hdr">
+      <div class="card-hdr-l">
+        <span class="sev-badge sev-${sc}">${f.severity}</span>
+        <span class="cve-id">${f.cve_id}</span>
+        <span class="pkg-name">${f.package}</span>
+        ${f.installed_version?`<span class="version-pill">${f.installed_version} → ${f.fixed_version||'no fix'}</span>`:''}
+      </div>
+      <span class="status-badge status-${stc}">${f.status.replace('_',' ')}</span>
+    </div>
+    ${f.title?`<div class="card-title-row">${esc(f.title)}</div>`:''}
+    <div class="card-cols">
+      <div class="card-col">${techColHtml(f)}</div>
+      <div class="card-col">${analysisColHtml(f)}</div>
+      <div class="card-col">${planColHtml(f)}</div>
+    </div>
+    <div class="card-actions">${actionsHtml(f)}</div>
+  </div>`;
+}
+
+function techColHtml(f) {
+  const sc = {CRITICAL:'critical',HIGH:'high',MEDIUM:'medium',LOW:'low'}[f.severity]||'low';
+  return `<div class="col-label">Technical Details</div>
+  <div class="detail-grid">
+    <span class="dk">Package</span><span class="dv">${f.package}</span>
+    <span class="dk">Severity</span><span class="dv sev-text-${sc}">${f.severity}</span>
+    <span class="dk">OS / Target</span><span class="dv">${esc(f.os_target||'—')}</span>
+    <span class="dk">Installed</span><span class="dv mono">${esc(f.installed_version||'—')}</span>
+    <span class="dk">Fixed in</span><span class="dv mono ${f.fixed_version?'':'text-muted'}">${esc(f.fixed_version||'No fix available')}</span>
+    <span class="dk">Category</span><span class="dv">${f.category==='npt'?'Non-Patchable':'Vulnerability'}</span>
+  </div>`;
+}
+
+function md2html(md) {
+  if (!md) return '';
+  return md
+    // headers
+    .replace(/^### (.+)$/gm, '<strong class="md-h3">$1</strong>')
+    .replace(/^## (.+)$/gm, '<strong class="md-h2">$1</strong>')
+    // bold
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    // inline code
+    .replace(/`([^`]+)`/g, '<code class="md-code">$1</code>')
+    // unordered list items
+    .replace(/^- (.+)$/gm, '<li>$1</li>')
+    // wrap consecutive <li> items
+    .replace(/(<li>.*<\/li>\n?)+/g, m => '<ul class="md-ul">' + m + '</ul>')
+    // line breaks
+    .replace(/\n/g, '<br>');
+}
+
+function analysisColHtml(f) {
+  if (!f.analysis_md) {
+    return `<div class="col-label">Agent Analysis</div>
+    <div class="no-data">No analysis yet.<br>
+    <button class="link-btn" onclick="runAnalysis()">Run Analysis</button></div>`;
+  }
+  return `<div class="col-label">Agent Analysis</div>
+  <div class="analysis-md">${md2html(f.analysis_md || '')}</div>`;
+}
+
+function planColHtml(f) {
+  if (f.plan_status==='pending') return `<div class="col-label">Remediation Plan</div><div class="plan-loading"><span class="spinner"></span> Generating… <span style="font-size:11px;color:var(--text3)">(LLM call in progress)</span></div>`;
+  if (f.plan_status==='na') return `<div class="col-label">Remediation Plan</div><div class="no-data" style="color:var(--text3)">No patch available<br><span style="font-size:11px">NPT — no fixed version published</span></div>`;
+  if (f.plan_status==='error') return `<div class="col-label">Remediation Plan</div><div class="plan-error">⚠ ${esc(f.plan?.plan_error||'error')}<br><button class="link-btn" onclick="retryPlan(${f.id})">Retry</button></div>`;
+  if (!f.plan) return `<div class="col-label">Remediation Plan</div><div class="no-data">No plan yet<br><button class="link-btn" onclick="retryPlan(${f.id})">Generate</button></div>`;
+  const p = f.plan;
+  const svc = p.services_to_restart||'none';
+  return `<div class="col-label">Remediation Plan</div>
+  <div class="detail-grid">
+    <span class="dk">Action</span><span class="dv">${esc(p.action||'—')}</span>
+    <span class="dk">Reboot</span><span class="dv">${p.reboot_required?'⚠ Yes':'No'}</span>
+    <span class="dk">Services</span><span class="dv mono">${esc(svc)}</span>
+    <span class="dk">Reason</span><span class="dv">${esc((p.reason||'').substring(0,120))}</span>
+  </div>
+  ${p.restore_plan?`<div class="restore-box"><span class="restore-lbl">Auto-rollback</span>${esc(p.restore_plan.substring(0,200))}</div>`:''}`;
+}
+
+function actionsHtml(f) {
+  const isOpen = ['open','deferred','skipped'].includes(f.status);
+  const isRem = f.status==='remediated';
+  const planOk = f.plan_status==='ready';
+  const rbtip = !planOk?'title="Waiting for plan…"':'';
+
+  const remBtn = `<button class="btn btn-success" ${!isOpen||!planOk?'disabled':''} ${rbtip} onclick="showRemediateModal(${f.id})">🤖 Agent-Remediate</button>`;
+  const defBtn = `<button class="btn btn-amber" ${!isOpen?'disabled':''} onclick="deferFinding(${f.id})">📋 Defer for Review</button>`;
+  const skipBtn = `<button class="btn btn-ghost" ${!isOpen?'disabled':''} onclick="skipFinding(${f.id})">✗ Not Remediate</button>`;
+
+  let rollBtn;
+  if (f.status==='rolled_back') {
+    rollBtn = `<button class="btn btn-outline" onclick="reopenFinding(${f.id})">↺ Re-open</button>`;
+  } else if (isRem && f.approved_rollback_token) {
+    rollBtn = `<button class="btn btn-danger" onclick="executeRollback(${f.id},'${f.approved_rollback_token}')">⚠ Execute Rollback</button>`;
+  } else if (isRem && f.pending_rollback_token) {
+    rollBtn = `<button class="btn btn-warn" onclick="manageApproval(${f.id},'${f.pending_rollback_token}')">⏳ Pending Approval</button>`;
+  } else if (isRem) {
+    rollBtn = `<button class="btn btn-warn" onclick="showRollbackModal(${f.id})">↩ Request Rollback</button>`;
+  } else {
+    rollBtn = `<button class="btn btn-ghost" disabled title="Available after remediation">↩ Rollback</button>`;
+  }
+
+  return `${remBtn}${defBtn}${skipBtn}<span class="action-sep"></span>${rollBtn}`;
+}
+
+// ── Actions ────────────────────────────────────────────────────────────────
+function showRemediateModal(fid) {
+  const f = S.findings.find(x=>x.id===fid);
+  if (!f||!f.plan) return toast('err','No plan available');
+  S.pendingFindingId = fid;
+  const p = f.plan;
+  const svc = p.services_to_restart||'none';
+  document.getElementById('rem-plan-kv').innerHTML = `
+    <span class="k">Action</span><span class="v">${esc(p.action)}</span>
+    <span class="k">Package</span><span class="v">${esc(p.package)}</span>
+    <span class="k">Services to restart</span><span class="v">${esc(svc)}</span>
+    <span class="k">Reboot required</span><span class="v">${p.reboot_required?'⚠ Yes':'No'}</span>
+    <span class="k">Reason</span><span class="v">${esc(p.reason||'—')}</span>`;
+  document.getElementById('rem-restore-text').textContent = p.restore_plan||'dnf history undo last (automatic)';
+  openModal('modal-remediate');
+}
+
+async function confirmRemediation() {
+  const fid = S.pendingFindingId;
+  if (!fid) return;
+  document.getElementById('btn-confirm-rem').disabled = true;
+  document.getElementById('btn-confirm-rem').innerHTML = '<span class="spinner"></span> Executing…';
+  try {
+    const r = await api('POST',`/findings/${fid}/remediate`);
+    closeModal();
+    toast(r.success?'ok':'err', r.success?'Remediation succeeded!':'Remediation failed — rolled back automatically');
+    await refreshFindings();
+  } catch(e) { toast('err','Error: '+e.message); }
+  finally {
+    document.getElementById('btn-confirm-rem').disabled = false;
+    document.getElementById('btn-confirm-rem').innerHTML = '✓ Approve &amp; Execute';
+  }
+}
+
+async function deferFinding(fid) {
+  try { await api('POST',`/findings/${fid}/defer`); toast('ok','Finding deferred'); await refreshFindings(); }
+  catch(e) { toast('err',e.message); }
+}
+
+async function skipFinding(fid) {
+  try { await api('POST',`/findings/${fid}/skip`); toast('ok','Marked as Not Remediate'); await refreshFindings(); }
+  catch(e) { toast('err',e.message); }
+}
+
+async function reopenFinding(fid) {
+  // Set back to open by using a lightweight approach — defer then open via UI reload
+  // We don't have a dedicated reopen endpoint, so update status to open via skip toggle trick.
+  // For now, just re-import or use the generate-plan endpoint as a status reset.
+  toast('info','Reload the page or re-import the scan to re-open a rolled-back finding.');
+}
+
+function showRollbackModal(fid) {
+  S.pendingFindingId = fid;
+  const f = S.findings.find(x=>x.id===fid);
+  const restoreText = f?.plan?.restore_plan || 'dnf history undo last — reverts to prior installed version and restarts affected services.';
+  document.getElementById('rb-restore-text').textContent = restoreText;
+  document.getElementById('rb-approver-email').value = '';
+  openModal('modal-rollback-req');
+}
+
+async function submitRollbackRequest() {
+  const fid = S.pendingFindingId;
+  const email = document.getElementById('rb-approver-email').value.trim();
+  try {
+    const r = await api('POST',`/findings/${fid}/request-rollback`,{approval_type:'rollback',approver_email:email||null});
+    closeModal();
+    toast('ok','Rollback approval request created');
+    // Auto-open approval modal so the owner can approve inline
+    await refreshFindings();
+    const f = S.findings.find(x=>x.id===fid);
+    if (f?.pending_rollback_token) manageApproval(fid, f.pending_rollback_token);
+  } catch(e) { toast('err',e.message); }
+}
+
+async function manageApproval(fid, token) {
+  S.pendingFindingId = fid;
+  S.pendingToken = token;
+  try {
+    const apv = await api('GET',`/approvals/${token}`);
+    const f = S.findings.find(x=>x.id===fid);
+    document.getElementById('apv-detail-block').innerHTML = `
+      <div class="apv-item">
+        <div class="apv-hdr">
+          <strong>Rollback Request — ${f?.cve_id||'Finding #'+fid}</strong>
+          <span class="apv-status apv-${apv.status}">${apv.status}</span>
+        </div>
+        <div class="text-sm">Package: <strong>${f?.package||'—'}</strong> | AIT: <strong>${apv.ait_id}</strong></div>
+        <div class="text-sm" style="margin-top:4px">Requested: ${new Date(apv.requested_at).toLocaleString()}</div>
+        ${apv.approver_email?`<div class="text-sm">Notified: ${apv.approver_email}</div>`:''}
+      </div>`;
+    document.getElementById('apv-notes').value = '';
+    document.getElementById('apv-email').value = apv.approver_email||'';
+    openModal('modal-approval');
+  } catch(e) { toast('err',e.message); }
+}
+
+async function handleApproval(action) {
+  const token = S.pendingToken;
+  if (!token) return;
+  const notes = document.getElementById('apv-notes').value.trim();
+  const email = document.getElementById('apv-email').value.trim();
+  try {
+    await api('POST',`/approvals/${token}/${action}`,{notes:notes||null,approver_email:email||null});
+    closeModal();
+    toast('ok', action==='approve'?'Rollback approved — click Execute Rollback to proceed':'Rollback rejected');
+    await refreshFindings();
+  } catch(e) { toast('err',e.message); }
+}
+
+async function executeRollback(fid, token) {
+  if (!confirm('Execute rollback now? This will run dnf history undo last on the target.')) return;
+  try {
+    const r = await api('POST',`/findings/${fid}/rollback?token=${token}`);
+    toast(r.success?'ok':'err', r.success?'Rollback executed successfully':'Rollback failed');
+    await refreshFindings();
+  } catch(e) { toast('err',e.message); }
+}
+
+async function retryPlan(fid) {
+  try {
+    await api('POST',`/findings/${fid}/generate-plan`);
+    toast('info','Plan generation started…');
+    startPoll();
+  } catch(e) { toast('err',e.message); }
+}
+
+async function generateAllPlans() {
+  if (!S.selectedAIT) return;
+  const btn = document.getElementById('btn-gen-plans');
+  btn.disabled = true; btn.textContent = '⚙ Generating…';
+  try {
+    const r = await api('POST', `/applications/${S.selectedAIT}/generate-plans`);
+    toast('ok', `Plan generation started for ${r.submitted} finding(s) — page will update automatically.`);
+    startPoll();
+  } catch(e) {
+    toast('err', 'Error: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = '⚙ Generate Plans';
+  }
+}
+
+async function runAnalysis() {
+  if (!S.selectedAIT) return;
+  closeModal();
+  toast('info', 'Analysis started — Agent Analysis column will update shortly…');
+  try {
+    await api('POST', `/applications/${S.selectedAIT}/analyze`);
+    startAnalysisPoll();
+  } catch(e) { toast('err', 'Analysis error: ' + e.message); }
+}
+
+let _analysisPollTimer = null;
+function startAnalysisPoll() {
+  if (_analysisPollTimer) clearInterval(_analysisPollTimer);
+  _analysisPollTimer = setInterval(async () => {
+    await refreshFindings();
+    const missing = S.findings.some(f => !f.analysis_md);
+    if (!missing) { clearInterval(_analysisPollTimer); _analysisPollTimer = null; }
+  }, 5000);
+}
+
+let S_analysisFile = null;
+function handleAnalysisFile(ev) {
+  S_analysisFile = ev.target.files[0];
+  if (!S_analysisFile) return;
+  document.getElementById('analysis-file-name').textContent = S_analysisFile.name;
+  document.getElementById('analysis-file-chip').classList.remove('hidden');
+  document.getElementById('btn-import-analysis').classList.remove('hidden');
+}
+
+async function importAnalysis() {
+  if (!S_analysisFile || !S.selectedAIT) return;
+  const fd = new FormData();
+  fd.append('file', S_analysisFile);
+  try {
+    const r = await fetch(`/api/v1/applications/${S.selectedAIT}/import-analysis`, {method:'POST', body:fd});
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || r.statusText);
+    closeModal();
+    toast('ok', `Imported analysis for ${j.imported} finding(s)`);
+    S_analysisFile = null;
+    document.getElementById('analysis-file-input').value = '';
+    await refreshFindings();
+  } catch(e) { toast('err', 'Import error: ' + e.message); }
+}
+
+// ── Create AIT ─────────────────────────────────────────────────────────────
+async function createAIT(ev) {
+  ev.preventDefault();
+  const fd = new FormData(ev.target);
+  const body = Object.fromEntries(fd.entries());
+  // remove empty strings
+  for (const k of Object.keys(body)) if (!body[k]) body[k]=null;
+  try {
+    await api('POST','/applications',body);
+    toast('ok',`${body.ait_id} created`);
+    ev.target.reset();
+    closeModal();
+    S.apps = await api('GET','/applications');
+    renderSidebar();
+  } catch(e) { toast('err',e.message); }
+}
+
+// ── Import Scan ────────────────────────────────────────────────────────────
+function handleFile(ev) {
+  const file = ev.target.files[0];
+  if (!file) return;
+  S.importFile = file;
+  document.getElementById('file-chip-name').textContent = file.name;
+  document.getElementById('file-chip-wrap').classList.remove('hidden');
+  document.getElementById('btn-import-submit').disabled = false;
+}
+
+function handleDrop(ev) {
+  ev.preventDefault();
+  document.getElementById('upload-zone').classList.remove('drag');
+  const file = ev.dataTransfer.files[0];
+  if (!file) return;
+  S.importFile = file;
+  document.getElementById('file-chip-name').textContent = file.name;
+  document.getElementById('file-chip-wrap').classList.remove('hidden');
+  document.getElementById('btn-import-submit').disabled = false;
+}
+
+function clearFile() {
+  S.importFile = null;
+  document.getElementById('file-input').value = '';
+  document.getElementById('file-chip-wrap').classList.add('hidden');
+  document.getElementById('btn-import-submit').disabled = true;
+}
+
+async function importScan() {
+  if (!S.importFile||!S.selectedAIT) return;
+  document.getElementById('btn-import-submit').disabled = true;
+  document.getElementById('btn-import-submit').innerHTML = '<span class="spinner"></span> Importing…';
+  try {
+    const r = await apiUpload(`/applications/${S.selectedAIT}/import`, S.importFile);
+    closeModal(); clearFile();
+    toast('ok',`Imported ${r.imported} findings. Plans generating in background…`);
+    await refreshFindings();
+    startPoll();
+  } catch(e) { toast('err','Import failed: '+e.message); }
+  finally {
+    document.getElementById('btn-import-submit').disabled = false;
+    document.getElementById('btn-import-submit').innerHTML = 'Import &amp; Analyze';
+  }
+}
+
+// ── Pending Approvals ──────────────────────────────────────────────────────
+async function openPendingApprovals() {
+  try {
+    const apvs = await api('GET','/approvals?status=pending');
+    const body = document.getElementById('apv-list-body');
+    if (!apvs.length) {
+      body.innerHTML='<div class="empty-state" style="padding:30px"><div class="empty-icon">✅</div><div class="empty-title">No pending approvals</div></div>';
+    } else {
+      body.innerHTML = apvs.map(a=>`
+        <div class="apv-item">
+          <div class="apv-hdr">
+            <strong>Rollback — Finding #${a.finding_id}</strong>
+            <span class="apv-status apv-pending">pending</span>
+          </div>
+          <div class="text-sm">AIT: ${a.ait_id} | Requested: ${new Date(a.requested_at).toLocaleString()}</div>
+          <div style="margin-top:8px;display:flex;gap:8px">
+            <button class="btn btn-warn btn-sm" onclick="manageApproval(${a.finding_id},'${a.token}');closeModal()">Review &amp; Decide</button>
+          </div>
+        </div>`).join('');
+    }
+    openModal('modal-apv-list');
+  } catch(e) { toast('err',e.message); }
+}
+
+// ── Poll for pending plans ─────────────────────────────────────────────────
+function startPoll() {
+  if (S.pollTimer) clearInterval(S.pollTimer);
+  S.pollTimer = setInterval(async ()=>{
+    const hasPending = S.findings.some(f=>f.plan_status==='pending');
+    if (!hasPending) { clearInterval(S.pollTimer); S.pollTimer=null; return; }
+    await refreshFindings();
+  }, 4000);
+}
+
+// ── Modal helpers ──────────────────────────────────────────────────────────
+function openModal(id) {
+  document.querySelectorAll('.modal').forEach(m=>m.classList.add('hidden'));
+  document.getElementById(id).classList.remove('hidden');
+  document.getElementById('overlay').classList.remove('hidden');
+}
+function closeModal() {
+  document.getElementById('overlay').classList.add('hidden');
+  document.querySelectorAll('.modal').forEach(m=>m.classList.add('hidden'));
+}
+function overlayClick(ev) { if (ev.target===document.getElementById('overlay')) closeModal(); }
+
+// ── Theme ──────────────────────────────────────────────────────────────────
+function toggleTheme() {
+  const html = document.documentElement;
+  html.dataset.theme = html.dataset.theme==='dark'?'light':'dark';
+}
+
+// ── Toast ──────────────────────────────────────────────────────────────────
+function toast(type, msg) {
+  const el = document.createElement('div');
+  el.className = 'toast toast-'+type;
+  el.innerHTML = (type==='ok'?'✓':type==='err'?'✗':'ℹ')+' '+esc(msg);
+  document.getElementById('toast-wrap').appendChild(el);
+  setTimeout(()=>el.remove(), 4500);
+}
+
+// ── Utils ──────────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Keyboard ──────────────────────────────────────────────────────────────
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeModal(); });
+
+// ── Boot ───────────────────────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>
