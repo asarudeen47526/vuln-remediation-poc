@@ -115,12 +115,15 @@ fi
 
 # ---- ensure pg_hba allows password auth from localhost ----------------------
 PG_HBA=$(sudo -u postgres psql -Atc "SHOW hba_file" 2>/dev/null || true)
-if [[ -n "$PG_HBA" ]] && ! grep -q "127.0.0.1.*md5\|127.0.0.1.*scram\|localhost.*md5\|localhost.*scram" "$PG_HBA" 2>/dev/null; then
+if [[ -n "$PG_HBA" ]] && ! sudo grep -q "127.0.0.1.*md5\|127.0.0.1.*scram\|localhost.*md5\|localhost.*scram" "$PG_HBA" 2>/dev/null; then
     # Prepend a host entry so the Python app can connect with a password
     TMP=$(mktemp)
     { echo "host    all             postgres        127.0.0.1/32            md5"
-      cat "$PG_HBA"; } > "$TMP"
-    sudo cp "$TMP" "$PG_HBA"; rm -f "$TMP"
+      sudo cat "$PG_HBA"; } > "$TMP"
+    sudo cp "$TMP" "$PG_HBA"
+    sudo chmod 600 "$PG_HBA"
+    sudo chown postgres:postgres "$PG_HBA"
+    rm -f "$TMP"
     sudo systemctl reload "$PG_SERVICE"
     info "Updated pg_hba.conf for local password auth."
 fi
