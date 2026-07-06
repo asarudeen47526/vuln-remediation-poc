@@ -113,19 +113,24 @@ if ! sudo systemctl is-active --quiet "$PG_SERVICE" 2>/dev/null; then
     sleep 3
 fi
 
-# ---- ensure pg_hba allows password auth from localhost ----------------------
+# ---- ensure pg_hba allows password auth from localhost (IPv4 + IPv6) -------
 PG_HBA=$(sudo -u postgres psql -Atc "SHOW hba_file" 2>/dev/null || true)
-if [[ -n "$PG_HBA" ]] && ! sudo grep -q "127.0.0.1.*md5\|127.0.0.1.*scram\|localhost.*md5\|localhost.*scram" "$PG_HBA" 2>/dev/null; then
-    # Prepend a host entry so the Python app can connect with a password
-    TMP=$(mktemp)
-    { echo "host    all             postgres        127.0.0.1/32            md5"
-      sudo cat "$PG_HBA"; } > "$TMP"
-    sudo cp "$TMP" "$PG_HBA"
-    sudo chmod 600 "$PG_HBA"
-    sudo chown postgres:postgres "$PG_HBA"
-    rm -f "$TMP"
-    sudo systemctl reload "$PG_SERVICE"
-    info "Updated pg_hba.conf for local password auth."
+if [[ -n "$PG_HBA" ]]; then
+    NEED_HBA=0
+    sudo grep -q "127\.0\.0\.1.*md5\|127\.0\.0\.1.*scram" "$PG_HBA" 2>/dev/null || NEED_HBA=1
+    sudo grep -q "::1.*md5\|::1.*scram"                    "$PG_HBA" 2>/dev/null || NEED_HBA=1
+    if [[ "$NEED_HBA" == "1" ]]; then
+        TMP=$(mktemp)
+        { echo "host    all             postgres        127.0.0.1/32            md5"
+          echo "host    all             postgres        ::1/128                 md5"
+          sudo cat "$PG_HBA"; } > "$TMP"
+        sudo cp "$TMP" "$PG_HBA"
+        sudo chmod 600 "$PG_HBA"
+        sudo chown postgres:postgres "$PG_HBA"
+        rm -f "$TMP"
+        sudo systemctl reload "$PG_SERVICE"
+        info "Updated pg_hba.conf for local password auth (IPv4 + IPv6)."
+    fi
 fi
 
 # ---- set postgres OS password to match DATABASE_URL -------------------------
