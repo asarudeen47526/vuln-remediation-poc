@@ -82,17 +82,71 @@ echo ""
 
 # ── 1. PostgreSQL ─────────────────────────────────────────────────────────────
 info "Checking PostgreSQL…"
-if ! pg_isready -q 2>/dev/null; then
-    info "PostgreSQL not responding — attempting to start…"
-    sudo systemctl start postgresql 2>/dev/null || \
-        die "Cannot start PostgreSQL. Run: sudo systemctl start postgresql"
+
+# ---- find service name (varies by distro / module stream) -------------------
+PG_SERVICE=""
+for _svc in postgresql postgresql-server postgresql-15 postgresql-14 postgresql-13; do
+    if sudo systemctl list-unit-files "${_svc}.service" 2>/dev/null | grep -q "${_svc}.service"; then
+        PG_SERVICE="$_svc"
+        break
+    fi
+done
+
+# ---- install + init if missing ----------------------------------------------
+if [[ -z "$PG_SERVICE" ]]; then
+    info "postgresql-server not found — installing…"
+    sudo dnf install -y postgresql-server || die "dnf install postgresql-server failed."
+    PG_SERVICE="postgresql"
+fi
+
+# ---- initialise data directory if needed ------------------------------------
+if ! sudo -u postgres test -f "/var/lib/pgsql/data/PG_VERSION" 2>/dev/null; then
+    info "Initialising PostgreSQL data directory…"
+    sudo postgresql-setup --initdb || sudo postgresql-setup initdb || \
+        die "postgresql-setup --initdb failed."
+fi
+
+# ---- start the service ------------------------------------------------------
+if ! sudo systemctl is-active --quiet "$PG_SERVICE" 2>/dev/null; then
+    sudo systemctl enable "$PG_SERVICE" 2>/dev/null || true
+    sudo systemctl start  "$PG_SERVICE" || die "Cannot start $PG_SERVICE."
     sleep 3
 fi
-if pg_isready -q 2>/dev/null; then
-    ok "PostgreSQL is ready."
-else
-    die "PostgreSQL is not ready. Check: sudo systemctl status postgresql"
+
+# ---- ensure pg_hba allows password auth from localhost ----------------------
+PG_HBA=$(sudo -u postgres psql -Atc "SHOW hba_file" 2>/dev/null || true)
+if [[ -n "$PG_HBA" ]] && ! grep -q "127.0.0.1.*md5\|127.0.0.1.*scram\|localhost.*md5\|localhost.*scram" "$PG_HBA" 2>/dev/null; then
+    # Prepend a host entry so the Python app can connect with a password
+    TMP=$(mktemp)
+    { echo "host    all             postgres        127.0.0.1/32            md5"
+      cat "$PG_HBA"; } > "$TMP"
+    sudo cp "$TMP" "$PG_HBA"; rm -f "$TMP"
+    sudo systemctl reload "$PG_SERVICE"
+    info "Updated pg_hba.conf for local password auth."
 fi
+
+# ---- set postgres OS password to match DATABASE_URL -------------------------
+PG_PASS="${DATABASE_URL:-}"
+PG_PASS="${PG_PASS##*:}"          # strip up to last colon (gets "password@host/db")
+PG_PASS="${PG_PASS%%@*}"          # strip from @ onwards  (gets "password")
+PG_PASS="${PG_PASS:-postgres}"
+sudo -u postgres psql -c "ALTER USER postgres PASSWORD '${PG_PASS}';" 2>/dev/null || true
+
+# ---- create the database if needed ------------------------------------------
+DB_NAME="${DATABASE_URL:-postgresql://postgres:postgres@localhost:5432/vulndb}"
+DB_NAME="${DB_NAME##*/}"          # last path component
+DB_EXISTS=$(sudo -u postgres psql -Atc \
+    "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'" 2>/dev/null || true)
+if [[ "$DB_EXISTS" != "1" ]]; then
+    sudo -u postgres createdb "$DB_NAME"
+    info "Created database '$DB_NAME'."
+fi
+
+# ---- final readiness check --------------------------------------------------
+if command -v pg_isready &>/dev/null; then
+    pg_isready -q 2>/dev/null || die "PostgreSQL not ready after start."
+fi
+ok "PostgreSQL is ready ($PG_SERVICE)."
 
 # ── 2. Database init ──────────────────────────────────────────────────────────
 if [[ "$RESET" == "1" ]]; then
