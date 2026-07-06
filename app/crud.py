@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional, List
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 from . import models, schemas
 
 
@@ -90,8 +90,8 @@ def list_findings(
     q = (
         db.query(models.Finding)
         .options(
-            joinedload(models.Finding.remediation_plan),
-            joinedload(models.Finding.approvals),
+            joinedload(models.Finding.remediation_plan),   # one-to-one: safe with joinedload
+            selectinload(models.Finding.approvals),         # one-to-many: selectinload avoids duplicate rows
         )
         .filter(models.Finding.ait_id == ait_id)
     )

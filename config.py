@@ -23,6 +23,10 @@ if os.path.exists(_env_file):
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "anthropic").lower()
 # Optional explicit model id; if empty a sane per-provider default is used.
 LLM_MODEL = os.getenv("LLM_MODEL", "")
+# Master AI kill-switch.  Set AI_ENABLED=0 in .env to stop ALL LLM calls
+# (analysis, plan generation, grouping) without restarting the server.
+# The dashboard remains fully functional for viewing/deferring/rolling back.
+AI_ENABLED = os.getenv("AI_ENABLED", "1") == "1"
 
 # --- Target VM (the machine being remediated) -------------------------------
 TARGET_HOST = os.getenv("TARGET_HOST", "10.0.0.20")

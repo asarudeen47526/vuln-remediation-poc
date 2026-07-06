@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 # because uvicorn is run from the project root.
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from config import ALLOWED_ACTIONS, DRY_RUN, HEALTH_URL, PLAYBOOK, SSH_KEY, SSH_USER, TARGET_HOST
+from config import AI_ENABLED, ALLOWED_ACTIONS, DRY_RUN, HEALTH_URL, PLAYBOOK, SSH_KEY, SSH_USER, TARGET_HOST
 
 from . import crud, models, schemas
 from .database import Base, SessionLocal, engine, get_db
@@ -88,42 +88,65 @@ def _finding_to_dict(f: models.Finding, family_group: str = "") -> dict:
 
 
 def _gen_plan_bg(finding_id: int):
-    """Generate + validate a plan for one finding; store result in DB."""
+    """Generate + validate a plan for one finding; store result in DB.
+
+    Pattern: read → close DB → LLM call → open DB → write → close.
+    This releases the connection before the slow LLM call so the pool
+    is not exhausted when multiple findings are queued concurrently.
+    """
     from remediation_core import make_plan, validate_plan
 
+    # ── Step 1: read finding (fast) ──────────────────────────────────────────
     db = SessionLocal()
     try:
         f = crud.get_finding(db, finding_id)
         if not f:
             return
         finding_dict = {
-            "cve": f.cve_id,
-            "package": f.package,
-            "installed": f.installed_version,
-            "fixed": f.fixed_version,
+            "cve": f.cve_id, "package": f.package,
+            "installed": f.installed_version, "fixed": f.fixed_version,
             "severity": f.severity,
         }
+        pkg = f.package
+        installed, fixed, cve_id = f.installed_version, f.fixed_version, f.cve_id
+    finally:
+        db.close()  # release connection before LLM call
+
+    # ── Step 2: plan generation (LLM only in live mode with AI enabled) ──────
+    plan = None
+    error = None
+    try:
         if DRY_RUN:
             plan = {
                 "action": "update_package",
-                "package": f.package,
+                "package": pkg,
                 "reboot_required": False,
                 "services_to_restart": [],
-                "reason": f"[DRY-RUN] Update {f.package} from {f.installed_version} to {f.fixed_version} to fix {f.cve_id}.",
-                "restore_plan": f"[DRY-RUN] dnf history undo last — restores {f.package} to {f.installed_version}.",
+                "reason": f"[DRY-RUN] Update {pkg} from {installed} to {fixed} to fix {cve_id}.",
+                "restore_plan": f"[DRY-RUN] dnf history undo last — restores {pkg} to {installed}.",
             }
+        elif not AI_ENABLED:
+            error = "AI disabled (AI_ENABLED=0 in .env) — set AI_ENABLED=1 to generate plans"
         else:
             plan = make_plan(finding_dict)
-        ok, why = validate_plan(plan, finding_dict)
-        if ok:
+        if plan is not None:
+            ok, why = validate_plan(plan, finding_dict)
+            if not ok:
+                plan, error = None, f"Validation failed: {why}"
+    except Exception as exc:  # noqa: BLE001
+        plan, error = None, str(exc)
+
+    # ── Step 3: write result (fast) ──────────────────────────────────────────
+    db = SessionLocal()
+    try:
+        if plan:
             crud.upsert_plan(db, finding_id, plan, None)
             crud.update_finding(db, finding_id, plan_status="ready")
         else:
-            crud.upsert_plan(db, finding_id, None, f"Validation failed: {why}")
+            crud.upsert_plan(db, finding_id, None, error)
             crud.update_finding(db, finding_id, plan_status="error")
     except Exception as exc:  # noqa: BLE001
-        crud.upsert_plan(db, finding_id, None, str(exc))
-        crud.update_finding(db, finding_id, plan_status="error")
+        print(f"[plan-bg] write failed for finding {finding_id}: {exc}")
     finally:
         db.close()
 
@@ -326,27 +349,28 @@ def _compute_groups_bg(ait_id: str, packages: list) -> None:
         '}'
     )
 
-    db = SessionLocal()
+    # ── Step 1: LLM call (slow, no DB connection held) ───────────────────────
+    groups = []
     try:
         raw = generate(SYSTEM, USER).strip()
-        # Strip markdown code fences the LLM may have added
         raw = re.sub(r"^```(?:json)?\s*", "", raw)
         raw = re.sub(r"\s*```$", "", raw.rstrip())
         data = json.loads(raw)
         groups = data.get("groups", [])
-
-        # Ensure every package in our list is assigned (LLM may miss some)
         assigned = {pkg for g in groups for pkg in g.get("packages", [])}
         for pkg in packages:
             if pkg not in assigned:
                 groups.append({"family": pkg, "reason": "not grouped by LLM", "packages": [pkg]})
+    except Exception as exc:
+        groups = [{"family": p, "reason": f"LLM unavailable: {exc}", "packages": [p]}
+                  for p in packages]
 
+    # ── Step 2: write results (fast) ─────────────────────────────────────────
+    db = SessionLocal()
+    try:
         crud.upsert_family_groups(db, ait_id, groups)
     except Exception as exc:
-        # Fallback: each package is its own family
-        fallback = [{"family": p, "reason": f"LLM unavailable: {exc}", "packages": [p]}
-                    for p in packages]
-        crud.upsert_family_groups(db, ait_id, fallback)
+        print(f"[groups-bg] write failed for {ait_id}: {exc}")
     finally:
         db.close()
 
@@ -600,26 +624,47 @@ def reject_rollback(token: str, data: schemas.ApprovalAction, db: Session = Depe
 # ─── Analysis ────────────────────────────────────────────────────────────────
 
 def _run_analysis_bg(ait_id: str) -> None:
-    """Run full LLM analysis for an AIT and store per-CVE results in DB."""
-    import re
+    """Run LLM analysis for findings that do not yet have analysis_md.
+
+    Pattern: read → close DB → LLM call → open DB → write → close.
+    Skips entirely when AI_ENABLED=0 or when all findings already have analysis.
+    """
+    if not AI_ENABLED:
+        return
+
+    # ── Step 1: read only unanalyzed findings (fast) ─────────────────────────
     db = SessionLocal()
     try:
         findings_db = crud.list_findings(db, ait_id)
-        if not findings_db:
-            return
+        unanalyzed = [f for f in findings_db if not f.analysis_md]
+        if not unanalyzed:
+            return  # nothing to do — avoids an LLM call entirely
         findings = [
             {"cve": f.cve_id, "package": f.package, "severity": f.severity,
              "installed": f.installed_version or "", "fixed": f.fixed_version or ""}
-            for f in findings_db
+            for f in unanalyzed
         ]
+        id_map = {f.cve_id: f.id for f in unanalyzed}
+    finally:
+        db.close()  # release connection before LLM call
+
+    # ── Step 2: LLM analysis (slow, no DB connection held) ───────────────────
+    try:
         from analyze import llm_analysis, _extract_per_cve
         analysis = llm_analysis(findings)
         per_cve = _extract_per_cve(analysis)
-        for f in findings_db:
-            text = per_cve.get(f.cve_id, analysis)
-            crud.update_finding(db, f.id, analysis_md=text)
     except Exception as exc:  # noqa: BLE001
         print(f"[analyze-bg] {ait_id}: {exc}")
+        return
+
+    # ── Step 3: store results (fast) ─────────────────────────────────────────
+    db = SessionLocal()
+    try:
+        for cve_id, finding_id in id_map.items():
+            text = per_cve.get(cve_id, analysis)
+            crud.update_finding(db, finding_id, analysis_md=text)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[analyze-bg] store {ait_id}: {exc}")
     finally:
         db.close()
 
