@@ -320,6 +320,54 @@ def remediate(finding_id: int, db: Session = Depends(get_db)):
     return {"success": success, "status": new_status, "rc": rc, "output": output[:500]}
 
 
+@app.post("/api/v1/applications/{ait_id}/remediate-bulk")
+def remediate_bulk(ait_id: str, data: schemas.BulkRemediateRequest, db: Session = Depends(get_db)):
+    """Run ONE Ansible play that fixes a whole package group (multiple CVEs)."""
+    if not crud.get_application(db, ait_id):
+        raise HTTPException(404, "Application not found")
+    findings = [crud.get_finding(db, fid) for fid in data.finding_ids]
+    findings = [f for f in findings if f and f.ait_id == ait_id]
+    if not findings:
+        raise HTTPException(400, "No valid findings for this AIT")
+    for f in findings:
+        if f.status not in ("open", "deferred", "skipped"):
+            raise HTTPException(400, f"Finding {f.id} has status '{f.status}' — cannot remediate")
+    rep = next((f for f in findings if f.plan_status == "ready" and f.remediation_plan), None)
+    if not rep:
+        raise HTTPException(400, "No validated plan available in this group")
+    plan = rep.remediation_plan.plan_json
+    if DRY_RUN:
+        rc = 0
+        output = f"[DRY_RUN] ansible-playbook skipped — would update {plan['package']}"
+    else:
+        services_str = ",".join(plan.get("services_to_restart") or [])
+        cmd = [
+            "ansible-playbook", "-i", f"{TARGET_HOST},", PLAYBOOK,
+            "-u", SSH_USER, "--private-key", SSH_KEY,
+            "-e", f"pkg={plan['package']}",
+            "-e", f"health_url={HEALTH_URL}",
+            "-e", f"services_to_restart={services_str}",
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        rc = result.returncode
+        output = result.stdout + result.stderr
+    success = rc == 0
+    new_status = "remediated" if success else "open"
+    for f in findings:
+        crud.update_finding(db, f.id, status=new_status)
+        crud.create_action(db, f.id, f.ait_id, "remediate", success=success, output=output)
+    from remediation_core import audit
+    audit("web-ui-bulk", {
+        "cve": ",".join(f.cve_id for f in findings),
+        "package": plan["package"],
+        "installed": rep.installed_version,
+        "fixed": rep.fixed_version,
+        "severity": rep.severity,
+    }, plan, "success" if success else "failed_rolled_back")
+    return {"success": success, "status": new_status, "rc": rc,
+            "remediated_count": len(findings), "output": output[:500]}
+
+
 @app.post("/api/v1/findings/{finding_id}/defer")
 def defer(finding_id: int, db: Session = Depends(get_db)):
     f = crud.get_finding(db, finding_id)

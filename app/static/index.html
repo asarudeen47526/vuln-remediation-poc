@@ -210,6 +210,39 @@ a{color:var(--accent)}
 .md-code { font-family:monospace; font-size:11px; background:var(--surface2); padding:1px 4px; border-radius:3px; color:var(--mono); }
 .md-ul { margin:4px 0 4px 16px; padding:0; }
 .md-ul li { margin-bottom:2px; }
+/* ── Filter bar ─────────────────────────────────────────────────────────── */
+.filter-bar{display:flex;align-items:center;gap:10px;padding:10px 20px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0;flex-wrap:wrap}
+.search-wrap{flex:1;min-width:180px;max-width:380px;position:relative}
+.search-wrap::before{content:"🔍";position:absolute;left:9px;top:50%;transform:translateY(-50%);font-size:11px;pointer-events:none;z-index:1}
+.search-wrap input{padding-left:28px}
+.sev-chips{display:flex;gap:4px;flex-wrap:wrap}
+.sev-chip{padding:3px 11px;border-radius:20px;font-size:11px;font-weight:700;border:1px solid transparent;cursor:pointer;transition:all .15s;white-space:nowrap}
+.sc-all{background:var(--surface2);color:var(--text2);border-color:var(--border)}.sc-all.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.sc-crit{background:var(--c-crit-bg);color:var(--c-crit);border-color:var(--c-crit)}.sc-crit.active{background:var(--c-crit);color:#fff}
+.sc-high{background:var(--c-high-bg);color:var(--c-high);border-color:var(--c-high)}.sc-high.active{background:var(--c-high);color:#fff}
+.sc-med{background:var(--c-med-bg);color:var(--c-med);border-color:var(--c-med)}.sc-med.active{background:var(--c-med);color:#000}
+.sc-low{background:var(--c-low-bg);color:var(--c-low);border-color:var(--c-low)}.sc-low.active{background:var(--c-low);color:#000}
+.view-toggle{margin-left:auto;display:flex;gap:4px}
+.view-btn{padding:4px 10px;border-radius:var(--r);font-size:12px;border:1px solid var(--border);background:var(--surface2);color:var(--text2);cursor:pointer;transition:all .15s}
+.view-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+/* ── Group card ─────────────────────────────────────────────────────────── */
+.group-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);margin-bottom:12px;overflow:hidden;transition:box-shadow .15s}
+.group-card:hover{box-shadow:0 4px 16px rgba(0,0,0,.3)}
+.group-hdr{display:flex;align-items:center;gap:8px;padding:12px 16px;flex-wrap:wrap}
+.group-pkg{font-weight:700;font-size:15px}
+.group-cnt{font-size:11px;background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:2px 8px;color:var(--text2)}
+.group-cve-list{border-top:1px solid var(--border)}
+.cve-row{display:grid;grid-template-columns:72px 135px 1fr 78px 90px;align-items:center;gap:8px;padding:7px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s}
+.cve-row:hover{background:var(--surface2)}
+.cve-title-col{font-size:12px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pi-ok{color:var(--c-low);font-size:12px;font-weight:700;text-align:center}
+.pi-pend{color:var(--c-med);font-size:12px;text-align:center}
+.pi-na{color:var(--text3);font-size:12px;text-align:center}
+.pi-err{color:var(--c-crit);font-size:12px;text-align:center}
+.cve-detail{display:none;padding:12px 16px;background:var(--surface2);border-bottom:1px solid var(--border)}
+.cve-detail.open{display:block}
+.group-foot-hint{font-size:11px;color:var(--text3)}
+.result-count{font-size:12px;color:var(--text3);padding:4px 0 8px}
 </style>
 </head>
 <body>
@@ -260,6 +293,24 @@ a{color:var(--accent)}
       <button class="tab-btn" id="tab-npt" onclick="switchTab('npt')">
         NPTs <span class="tab-count" id="cnt-npt">0</span>
       </button>
+    </div>
+
+    <!-- Filter bar -->
+    <div class="filter-bar" id="filter-bar" style="display:none">
+      <div class="search-wrap">
+        <input type="search" id="search-input" placeholder="Search CVE ID, package, title…" oninput="onSearch(this.value)">
+      </div>
+      <div class="sev-chips">
+        <button class="sev-chip sc-all active" data-sev="" onclick="setSevFilter('')">All</button>
+        <button class="sev-chip sc-crit" data-sev="CRITICAL" onclick="setSevFilter('CRITICAL')">Critical</button>
+        <button class="sev-chip sc-high" data-sev="HIGH" onclick="setSevFilter('HIGH')">High</button>
+        <button class="sev-chip sc-med" data-sev="MEDIUM" onclick="setSevFilter('MEDIUM')">Medium</button>
+        <button class="sev-chip sc-low" data-sev="LOW" onclick="setSevFilter('LOW')">Low</button>
+      </div>
+      <div class="view-toggle">
+        <button class="view-btn active" id="view-btn-grouped" onclick="setViewMode(true)" title="Group by package">⊞ Grouped</button>
+        <button class="view-btn" id="view-btn-flat" onclick="setViewMode(false)" title="Individual cards">☰ Flat</button>
+      </div>
     </div>
 
     <!-- Findings -->
@@ -411,7 +462,9 @@ a{color:var(--accent)}
 const S = {
   apps: [], selectedAIT: null, findings: [], stats: {},
   activeTab: 'vulnerability', pendingFindingId: null, pendingToken: null,
+  pendingGroupIds: null,
   pollTimer: null, importFile: null,
+  sevFilter: '', searchQuery: '', groupedView: true,
 };
 
 // ── API ────────────────────────────────────────────────────────────────────
@@ -482,6 +535,7 @@ async function selectAIT(aitId) {
   document.getElementById('btn-analyze').disabled = false;
   document.getElementById('import-ait-label').textContent = aitId;
   document.getElementById('analyze-ait-label').textContent = aitId;
+  document.getElementById('filter-bar').style.display = '';
   await refreshFindings();
   startPoll();
 }
@@ -523,13 +577,40 @@ function switchTab(tab) {
 // ── Findings ───────────────────────────────────────────────────────────────
 function renderFindings() {
   const wrap = document.getElementById('findings-wrap');
-  const list = S.findings.filter(f=>f.category===S.activeTab);
   if (!S.selectedAIT) { wrap.innerHTML=emptyHtml('🛡','Select an Application','Choose an AIT from the sidebar'); return; }
-  if (!list.length) {
-    const lbl = S.activeTab==='npt'?'Non-Patchable Treatments':'Vulnerabilities';
-    wrap.innerHTML=emptyHtml('✅','No '+lbl,'Import a scan to populate this list'); return;
+
+  let list = S.findings.filter(f => f.category === S.activeTab);
+
+  // Severity filter
+  if (S.sevFilter) list = list.filter(f => f.severity === S.sevFilter);
+
+  // Search filter
+  if (S.searchQuery) {
+    const q = S.searchQuery.toLowerCase();
+    list = list.filter(f =>
+      f.cve_id.toLowerCase().includes(q) ||
+      f.package.toLowerCase().includes(q) ||
+      (f.title||'').toLowerCase().includes(q) ||
+      (f.severity||'').toLowerCase().includes(q)
+    );
   }
-  wrap.innerHTML = list.map(cardHtml).join('');
+
+  if (!list.length) {
+    const reason = S.searchQuery || S.sevFilter ? 'Try a different search term or filter' : 'Import a scan to populate this list';
+    const lbl = S.activeTab==='npt'?'Non-Patchable Treatments':'Vulnerabilities';
+    wrap.innerHTML = emptyHtml('✅', 'No ' + lbl, reason);
+    return;
+  }
+
+  const total = list.length;
+  const countHtml = `<div class="result-count">${total} finding${total!==1?'s':''} shown${S.searchQuery||S.sevFilter?' (filtered)':''}</div>`;
+
+  if (S.activeTab === 'vulnerability' && S.groupedView) {
+    const groups = groupByPackage(list);
+    wrap.innerHTML = countHtml + groups.map(groupCardHtml).join('');
+  } else {
+    wrap.innerHTML = countHtml + list.map(cardHtml).join('');
+  }
 }
 
 function emptyHtml(icon,title,sub) {

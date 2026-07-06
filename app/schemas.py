@@ -20,3 +20,7 @@ class ApprovalCreate(BaseModel):
 class ApprovalAction(BaseModel):
     notes: Optional[str] = None
     approver_email: Optional[str] = None
+
+
+class BulkRemediateRequest(BaseModel):
+    finding_ids: list[int]
