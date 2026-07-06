@@ -257,6 +257,21 @@ def _store_analysis(analysis_md: str) -> int:
         return 0
 
 
+def _trigger_compute_groups() -> None:
+    """Ask the LLM to group packages into logical families (runs in background on server)."""
+    try:
+        req = urllib.request.Request(
+            f"{API}/applications/{AIT_ID}/compute-groups",
+            data=b"{}",
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=10)
+        _log("LLM package grouping triggered (background).")
+    except Exception as exc:
+        _log(f"[warn] compute-groups failed: {exc}")
+
+
 def _save_report(analysis_md: str) -> None:
     """Write analysis markdown to reports/ directory."""
     os.makedirs(REPORTS_DIR, exist_ok=True)
@@ -294,11 +309,14 @@ def main() -> None:
                     n = _store_analysis(analysis_md)
                     _log(f"Analysis stored for {n} CVE(s). Dashboard updated.")
                     _save_report(analysis_md)
+                    _trigger_compute_groups()
                 else:
                     _log("Analysis skipped (LLM unavailable). "
                          "Use the UI '🔬 Analyze' button, or check LLM_PROVIDER in .env.")
             else:
                 _log("All findings have analysis. Nothing to do this cycle.")
+                # Re-trigger grouping if not yet computed
+                _trigger_compute_groups()
 
             # Also kick remediation plans for any findings still pending
             submitted = _trigger_plans()
@@ -346,6 +364,7 @@ def main() -> None:
         else:
             _log("LLM analysis skipped. Use the UI '🔬 Analyze' button when ready.")
 
+        _trigger_compute_groups()
         _log(f"Cycle complete. Dashboard: http://localhost:{PORT}")
         time.sleep(WATCH_INTERVAL)
 

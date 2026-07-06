@@ -232,7 +232,7 @@ a{color:var(--accent)}
 .group-pkg{font-weight:700;font-size:15px}
 .group-cnt{font-size:11px;background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:2px 8px;color:var(--text2)}
 .group-cve-list{border-top:1px solid var(--border)}
-.cve-row{display:grid;grid-template-columns:72px 135px 1fr 78px 90px;align-items:center;gap:8px;padding:7px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s}
+.cve-row{display:grid;grid-template-columns:72px 130px 120px 1fr 78px 90px;align-items:center;gap:8px;padding:7px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s}
 .cve-row:hover{background:var(--surface2)}
 .cve-title-col{font-size:12px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pi-ok{color:var(--c-low);font-size:12px;font-weight:700;text-align:center}
@@ -243,6 +243,15 @@ a{color:var(--accent)}
 .cve-detail.open{display:block}
 .group-foot-hint{font-size:11px;color:var(--text3)}
 .result-count{font-size:12px;color:var(--text3);padding:4px 0 8px}
+/* ── 3-level hierarchy (family → package → CVE) ────────────────────────────── */
+.family-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);margin-bottom:16px;overflow:hidden}
+.family-hdr{display:flex;align-items:center;gap:8px;padding:12px 16px;cursor:pointer;user-select:none;flex-wrap:wrap;transition:background .12s}
+.family-hdr:hover{background:var(--surface2)}
+.expand-icon{font-size:13px;color:var(--text3);width:14px;flex-shrink:0;font-weight:700;line-height:1;font-family:monospace}
+.family-name{font-weight:700;font-size:15px}
+.family-cnt-pill{font-size:11px;background:rgba(99,102,241,.12);color:var(--accent);border-radius:20px;padding:2px 9px;border:1px solid rgba(99,102,241,.25)}
+.family-body{border-top:1px solid var(--border)}
+.family-actions{display:flex;gap:8px;padding:10px 16px;border-top:1px solid var(--border);background:rgba(0,0,0,.12);flex-wrap:wrap;align-items:center}
 </style>
 </head>
 <body>
@@ -310,6 +319,7 @@ a{color:var(--accent)}
       <div class="view-toggle">
         <button class="view-btn active" id="view-btn-grouped" onclick="setViewMode(true)" title="Group by package">⊞ Grouped</button>
         <button class="view-btn" id="view-btn-flat" onclick="setViewMode(false)" title="Individual cards">☰ Flat</button>
+        <button class="view-btn" id="btn-compute-groups" onclick="computeGroups()" title="Ask the LLM to intelligently group related packages into families">🤖 AI Group</button>
       </div>
     </div>
 
@@ -465,6 +475,7 @@ const S = {
   pendingGroupIds: null,
   pollTimer: null, importFile: null,
   sevFilter: '', searchQuery: '', groupedView: true,
+  _lastSidebarRefresh: 0,
 };
 
 // ── API ────────────────────────────────────────────────────────────────────
@@ -543,19 +554,39 @@ async function selectAIT(aitId) {
 async function refreshFindings() {
   if (!S.selectedAIT) return;
   try {
-    const [findings, stats] = await Promise.all([
-      api('GET',`/applications/${S.selectedAIT}/findings`),
-      api('GET',`/applications/${S.selectedAIT}/stats`),
-    ]);
-    S.findings = findings; S.stats = stats;
+    S.findings = await api('GET',`/applications/${S.selectedAIT}/findings`);
+    S.stats = computeStatsFromFindings(S.findings);
     renderStats(); renderFindings();
-    // Refresh sidebar counts
-    S.apps = await api('GET','/applications');
-    renderSidebar();
+    // Refresh sidebar at most every 15s to avoid unnecessary API round-trips
+    if (Date.now() - S._lastSidebarRefresh > 15000) {
+      S.apps = await api('GET','/applications');
+      S._lastSidebarRefresh = Date.now();
+      renderSidebar();
+    }
   } catch(e) { toast('err','Failed to load: '+e.message); }
 }
 
 // ── Stats ──────────────────────────────────────────────────────────────────
+function computeStatsFromFindings(findings) {
+  const s = {total:0,critical:0,high:0,medium:0,low:0,open:0,remediated:0,deferred:0,skipped:0,rolled_back:0,vulnerabilities:0,npts:0,pending_approvals:0};
+  for (const f of findings) {
+    s.total++;
+    if (f.severity==='CRITICAL') s.critical++;
+    else if (f.severity==='HIGH') s.high++;
+    else if (f.severity==='MEDIUM') s.medium++;
+    else if (f.severity==='LOW') s.low++;
+    if (f.status==='open') s.open++;
+    else if (f.status==='remediated') s.remediated++;
+    else if (f.status==='deferred') s.deferred++;
+    else if (f.status==='skipped') s.skipped++;
+    else if (f.status==='rolled_back') s.rolled_back++;
+    if (f.category==='vulnerability') s.vulnerabilities++;
+    else if (f.category==='npt') s.npts++;
+    if (f.pending_rollback_token) s.pending_approvals++;
+  }
+  return s;
+}
+
 function renderStats() {
   const m = {'total':'s-total','critical':'s-critical','high':'s-high','open':'s-open','remediated':'s-remediated','deferred':'s-deferred','npts':'s-npts'};
   for (const [k,id] of Object.entries(m)) {
@@ -605,9 +636,9 @@ function renderFindings() {
   const total = list.length;
   const countHtml = `<div class="result-count">${total} finding${total!==1?'s':''} shown${S.searchQuery||S.sevFilter?' (filtered)':''}</div>`;
 
-  if (S.activeTab === 'vulnerability' && S.groupedView) {
-    const groups = groupByPackage(list);
-    wrap.innerHTML = countHtml + groups.map(groupCardHtml).join('');
+  if (S.groupedView) {
+    const families = groupByFamily(list);
+    wrap.innerHTML = countHtml + families.map(familyCardHtml).join('');
   } else {
     wrap.innerHTML = countHtml + list.map(cardHtml).join('');
   }
@@ -745,48 +776,128 @@ function setViewMode(grouped) {
   renderFindings();
 }
 
-// ── Grouping ───────────────────────────────────────────────────────────────
-function groupByPackage(findings) {
-  const map = new Map();
-  for (const f of findings) {
-    const key = f.package + '||' + (f.fixed_version || '');
-    if (!map.has(key)) map.set(key, []);
-    map.get(key).push(f);
+async function computeGroups() {
+  if (!S.selectedAIT) return;
+  const btn = document.getElementById('btn-compute-groups');
+  btn.disabled = true;
+  btn.textContent = '⏳ Grouping…';
+  try {
+    const r = await api('POST', `/applications/${S.selectedAIT}/compute-groups`);
+    toast('info', `LLM grouping ${r.packages} package(s)… findings will regroup shortly`);
+    // Poll until family_group values appear in findings
+    let attempts = 0;
+    const poll = setInterval(async () => {
+      await refreshFindings();
+      attempts++;
+      const hasGroups = S.findings.some(f => f.family_group && f.family_group.trim());
+      if (hasGroups || attempts > 20) {
+        clearInterval(poll);
+        btn.disabled = false;
+        btn.textContent = '🤖 AI Group';
+        if (hasGroups) toast('ok', 'AI grouping complete — packages regrouped by LLM');
+      }
+    }, 2500);
+  } catch(e) {
+    toast('err', 'AI Group error: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = '🤖 AI Group';
   }
-  const sevOrd = {CRITICAL:0, HIGH:1, MEDIUM:2, LOW:3};
-  return [...map.values()].sort((a, b) => {
-    const as = Math.min(...a.map(f => sevOrd[f.severity] ?? 9));
-    const bs = Math.min(...b.map(f => sevOrd[f.severity] ?? 9));
-    return as !== bs ? as - bs : b.length - a.length;
-  });
 }
 
-function groupCardHtml(group) {
-  const f0 = group[0];
-  const pkg = f0.package;
-  const installed = f0.installed_version || '?';
-  const fixed = group.map(f => f.fixed_version).filter(Boolean).sort().pop() || 'no fix';
-  const sevOrd = {CRITICAL:0, HIGH:1, MEDIUM:2, LOW:3};
-  const maxSev = group.reduce((m, f) => (sevOrd[f.severity]??9) < (sevOrd[m]??9) ? f.severity : m, 'LOW');
-  const sc = {CRITICAL:'critical',HIGH:'high',MEDIUM:'medium',LOW:'low'}[maxSev]||'low';
-  const allOpen = group.every(f => ['open','deferred','skipped'].includes(f.status));
-  const vulnFindings = group.filter(f => f.category === 'vulnerability');
-  const allReady = vulnFindings.length > 0 && vulnFindings.every(f => f.plan_status === 'ready');
-  const hasPending = group.some(f => f.plan_status === 'pending');
-  const remCount = group.filter(f => f.status === 'remediated').length;
-  const ids = group.map(f => f.id);
+// ── 3-level hierarchy: family → package → CVE ──────────────────────────────
+// Grouping is LLM-driven: the server stores `family_group` per package via
+// POST /compute-groups.  Until the LLM responds, each package is its own
+// family (safe degraded mode).  The static getPackageFamily heuristic is gone.
 
-  const cveRows = group.map(f => {
-    const fsc = {CRITICAL:'critical',HIGH:'high',MEDIUM:'medium',LOW:'low'}[f.severity]||'low';
-    const fstc = {open:'open',remediated:'remediated',deferred:'deferred',skipped:'skipped',rolled_back:'rolled-back'}[f.status]||'open';
-    let planIcon, piClass;
-    if (f.plan_status==='ready')   { planIcon='✓ Ready';  piClass='pi-ok'; }
-    else if (f.plan_status==='pending') { planIcon='⏳';   piClass='pi-pend'; }
-    else if (f.plan_status==='na') { planIcon='— NPT';    piClass='pi-na'; }
-    else                           { planIcon='⚠ Err';    piClass='pi-err'; }
-    return `<div class="cve-row" onclick="toggleCveDetail(${f.id})">
+function groupByFamily(findings) {
+  const sevOrd = {CRITICAL:0, HIGH:1, MEDIUM:2, LOW:3};
+  const famMap = new Map();   // family → Map(pkgKey → [findings])
+  for (const f of findings) {
+    // LLM-assigned family_group wins; fall back to exact package name
+    const fam = (f.family_group && f.family_group.trim()) ? f.family_group : f.package;
+    if (!famMap.has(fam)) famMap.set(fam, new Map());
+    const pkgKey = f.package + '||' + (f.fixed_version || '');
+    if (!famMap.get(fam).has(pkgKey)) famMap.get(fam).set(pkgKey, []);
+    famMap.get(fam).get(pkgKey).push(f);
+  }
+  const families = [];
+  for (const [family, pkgMap] of famMap) {
+    const pkgGroups = [...pkgMap.values()];
+    const allFindings = pkgGroups.flat();
+    const ms = Math.min(...allFindings.map(f => sevOrd[f.severity] ?? 9));
+    const maxSev = Object.keys(sevOrd).find(s => sevOrd[s] === ms) || 'LOW';
+    // Base package (same name as family) sorts first; others alphabetically
+    pkgGroups.sort((a, b) => {
+      const an = a[0].package, bn = b[0].package;
+      if (an === family) return -1;
+      if (bn === family) return 1;
+      return an.localeCompare(bn);
+    });
+    const aiGrouped = allFindings.some(f => f.family_group && f.family_group.trim());
+    families.push({ family, pkgGroups, allFindings, maxSev, aiGrouped });
+  }
+  families.sort((a, b) => {
+    const as = sevOrd[a.maxSev] ?? 9, bs = sevOrd[b.maxSev] ?? 9;
+    return as !== bs ? as - bs : b.allFindings.length - a.allFindings.length;
+  });
+  return families;
+}
+
+function familyCardHtml(fg) {
+  const { family, pkgGroups, allFindings, maxSev, aiGrouped } = fg;
+  const sc = {CRITICAL:'critical',HIGH:'high',MEDIUM:'medium',LOW:'low'}[maxSev]||'low';
+  const famId = 'fam-' + family.replace(/[^a-z0-9]/gi,'-').toLowerCase();
+  const totalCVEs = allFindings.length;
+  const remCount = allFindings.filter(f => f.status === 'remediated').length;
+  const allOpen = allFindings.every(f => ['open','deferred','skipped'].includes(f.status));
+  const anyReady = allFindings.some(f => f.plan_status === 'ready' && f.category === 'vulnerability');
+  const hasPending = allFindings.some(f => f.plan_status === 'pending');
+  const pkgCount = pkgGroups.length;
+  // Base package findings first → backend picks base-package plan (e.g. dnf update nginx cascades to mod-*)
+  const baseIds = (pkgGroups[0] || []).map(f => f.id);
+  const restIds = allFindings.map(f => f.id).filter(id => !baseIds.includes(id));
+  const sortedIds = [...baseIds, ...restIds];
+
+  const cveHtml = allFindings.map(flatCveRowHtml).join('');
+
+  return `<div class="family-card sev-border-${sc}" id="${famId}">
+    <div class="family-hdr" onclick="toggleFamily('${famId}')">
+      <span class="expand-icon" id="${famId}-icon">−</span>
+      <span class="sev-badge sev-${sc}">${maxSev}</span>
+      <span class="family-name">${esc(family)}</span>
+      ${pkgCount>1&&aiGrouped?`<span class="family-cnt-pill" style="background:rgba(34,197,94,.1);color:#22c55e;border-color:#15803d">🤖 AI</span>`:''}
+      <span class="family-cnt-pill">${pkgCount} pkg${pkgCount>1?'s':''}</span>
+      <span class="group-cnt">${totalCVEs} finding${totalCVEs>1?'s':''}</span>
+      ${remCount>0?`<span class="group-cnt" style="color:var(--s-rem)">${remCount} remediated</span>`:''}
+      ${hasPending?'<span class="spinner"></span>':''}
+    </div>
+    <div class="family-body" id="${famId}-body">
+      <div class="group-cve-list">${cveHtml}</div>
+      <div class="family-actions">
+        <button class="btn btn-success" ${!allOpen||!anyReady?'disabled':''} onclick="remediateFamily(${JSON.stringify(sortedIds)},${JSON.stringify(family)},event)">🤖 Remediate Family (${totalCVEs} finding${totalCVEs>1?'s':''})</button>
+        <button class="btn btn-amber" ${!allOpen?'disabled':''} onclick="deferGroup(${JSON.stringify(allFindings.map(f=>f.id))})">📋 Defer All</button>
+        <span class="action-sep"></span>
+        <span class="group-foot-hint">${esc(family)} · ${pkgCount} pkg${pkgCount>1?'s':''} · ${totalCVEs} finding${totalCVEs>1?'s':''}</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+function flatCveRowHtml(f) {
+  const fsc = {CRITICAL:'critical',HIGH:'high',MEDIUM:'medium',LOW:'low'}[f.severity]||'low';
+  const fstc = {open:'open',remediated:'remediated',deferred:'deferred',skipped:'skipped',rolled_back:'rolled-back'}[f.status]||'open';
+  let planIcon, piClass;
+  if (f.plan_status==='ready')        { planIcon='✓ Ready'; piClass='pi-ok'; }
+  else if (f.plan_status==='pending') { planIcon='⏳';      piClass='pi-pend'; }
+  else if (f.plan_status==='na')      { planIcon='— NPT';   piClass='pi-na'; }
+  else                                { planIcon='⚠ Err';   piClass='pi-err'; }
+  const isOpen = ['open','deferred','skipped'].includes(f.status);
+  const planOk = f.plan_status === 'ready';
+  return `<div>
+    <div class="cve-row" onclick="toggleCveDetail(${f.id})">
       <span class="sev-badge sev-${fsc}">${f.severity}</span>
       <span class="cve-id">${f.cve_id}</span>
+      <span style="font-family:monospace;font-size:11px;color:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.package)}</span>
       <span class="cve-title-col">${esc(f.title||'')}</span>
       <span class="${piClass}">${planIcon}</span>
       <span class="status-badge status-${fstc}">${f.status.replace('_',' ')}</span>
@@ -798,33 +909,23 @@ function groupCardHtml(group) {
         <div class="card-col">${planColHtml(f)}</div>
       </div>
       <div style="display:flex;gap:8px;padding:8px 0 0;flex-wrap:wrap">
-        <button class="btn btn-success" style="font-size:12px;padding:4px 10px" ${f.status!=='open'||f.plan_status!=='ready'?'disabled':''} onclick="showRemediateModal(${f.id});event.stopPropagation()">🤖 Remediate this CVE</button>
-        <button class="btn btn-amber" style="font-size:12px;padding:4px 10px" ${!['open','deferred','skipped'].includes(f.status)?'disabled':''} onclick="deferFinding(${f.id});event.stopPropagation()">📋 Defer</button>
-        <button class="btn btn-ghost" style="font-size:12px;padding:4px 10px" ${!['open','deferred','skipped'].includes(f.status)?'disabled':''} onclick="skipFinding(${f.id});event.stopPropagation()">✗ Skip</button>
+        <button class="btn btn-success" style="font-size:12px;padding:4px 10px" ${!isOpen||!planOk?'disabled':''} onclick="showRemediateModal(${f.id});event.stopPropagation()">🤖 Remediate</button>
+        <button class="btn btn-amber" style="font-size:12px;padding:4px 10px" ${!isOpen?'disabled':''} onclick="deferFinding(${f.id});event.stopPropagation()">📋 Defer</button>
+        <button class="btn btn-ghost" style="font-size:12px;padding:4px 10px" ${!isOpen?'disabled':''} onclick="skipFinding(${f.id});event.stopPropagation()">✗ Skip</button>
       </div>
-    </div>`;
-  }).join('');
-
-  return `<div class="group-card sev-border-${sc}">
-    <div class="group-hdr">
-      <span class="sev-badge sev-${sc}">${maxSev}</span>
-      <span class="group-pkg">${esc(pkg)}</span>
-      <span class="version-pill">${esc(installed)} → ${esc(fixed)}</span>
-      <span class="group-cnt">${group.length} CVE${group.length>1?'s':''}</span>
-      ${remCount>0?`<span class="group-cnt" style="color:var(--s-rem)">${remCount} remediated</span>`:''}
-      ${hasPending?'<span class="spinner"></span>':''}
-    </div>
-    <div class="group-cve-list">${cveRows}</div>
-    <div class="card-actions">
-      <button class="btn btn-success" ${!allOpen||!allReady?'disabled':''} onclick="remediateGroup(${JSON.stringify(ids)})">
-        🤖 Remediate All (${vulnFindings.length})
-      </button>
-      <button class="btn btn-amber" ${!allOpen?'disabled':''} onclick="deferGroup(${JSON.stringify(ids)})">📋 Defer All</button>
-      <span class="action-sep"></span>
-      <span class="group-foot-hint">1 Ansible run patches ${esc(pkg)} · fixes all ${group.length} CVE${group.length>1?'s':''}</span>
     </div>
   </div>`;
 }
+
+function toggleFamily(famId) {
+  const body = document.getElementById(famId + '-body');
+  const icon = document.getElementById(famId + '-icon');
+  if (!body) return;
+  const isOpen = !body.classList.contains('hidden');
+  body.classList.toggle('hidden', isOpen);
+  if (icon) icon.textContent = isOpen ? '+' : '−';
+}
+
 
 function toggleCveDetail(fid) {
   const el = document.getElementById('detail-' + fid);
@@ -850,6 +951,31 @@ async function remediateGroup(ids) {
   document.getElementById('rem-plan-kv').innerHTML = `
     <span class="k">Action</span><span class="v">${esc(p.action)}</span>
     <span class="k">Package</span><span class="v">${esc(p.package)}</span>
+    <span class="k">Fixes CVEs</span><span class="v" style="word-break:break-all;font-size:12px">${esc(cveList)}</span>
+    <span class="k">Services to restart</span><span class="v">${esc(p.services_to_restart||'none')}</span>
+    <span class="k">Reboot required</span><span class="v">${p.reboot_required?'⚠ Yes':'No'}</span>
+    <span class="k">Reason</span><span class="v">${esc(p.reason||'—')}</span>`;
+  document.getElementById('rem-restore-text').textContent = p.restore_plan || 'dnf history undo last (automatic)';
+  openModal('modal-remediate');
+}
+
+async function remediateFamily(sortedIds, family, event) {
+  if (event) event.stopPropagation();
+  if (!S.selectedAIT) return;
+  const findings = S.findings.filter(f => sortedIds.includes(f.id));
+  // Base-package findings come first in sortedIds — backend picks that plan
+  // so dnf update <base-pkg> cascades to all sub-packages in the family
+  const rep = findings.find(f => f.plan_status === 'ready' && f.plan);
+  if (!rep) return toast('err', 'No validated plan available for ' + family);
+  S.pendingGroupIds = sortedIds;
+  S.pendingFindingId = null;
+  const p = rep.plan;
+  const cveList = findings.map(f => f.cve_id).join(', ');
+  const pkgList = [...new Set(findings.map(f => f.package))].join(', ');
+  document.getElementById('rem-plan-kv').innerHTML = `
+    <span class="k">Action</span><span class="v">${esc(p.action)}</span>
+    <span class="k">Family</span><span class="v">${esc(family)}</span>
+    <span class="k">Packages</span><span class="v" style="font-size:12px">${esc(pkgList)}</span>
     <span class="k">Fixes CVEs</span><span class="v" style="word-break:break-all;font-size:12px">${esc(cveList)}</span>
     <span class="k">Services to restart</span><span class="v">${esc(p.services_to_restart||'none')}</span>
     <span class="k">Reboot required</span><span class="v">${p.reboot_required?'⚠ Yes':'No'}</span>
@@ -1107,9 +1233,10 @@ async function importScan() {
   try {
     const r = await apiUpload(`/applications/${S.selectedAIT}/import`, S.importFile);
     closeModal(); clearFile();
-    toast('ok',`Imported ${r.imported} findings. Plans generating in background…`);
+    toast('ok',`Imported ${r.imported} findings. Analysis & plans generating in background…`);
     await refreshFindings();
     startPoll();
+    startAnalysisPoll();
   } catch(e) { toast('err','Import failed: '+e.message); }
   finally {
     document.getElementById('btn-import-submit').disabled = false;

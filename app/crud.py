@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional, List
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from . import models, schemas
 
 
@@ -87,7 +87,14 @@ def list_findings(
     status: Optional[str] = None,
 ) -> List[models.Finding]:
     sev_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
-    q = db.query(models.Finding).filter(models.Finding.ait_id == ait_id)
+    q = (
+        db.query(models.Finding)
+        .options(
+            joinedload(models.Finding.remediation_plan),
+            joinedload(models.Finding.approvals),
+        )
+        .filter(models.Finding.ait_id == ait_id)
+    )
     if category:
         q = q.filter(models.Finding.category == category)
     if status:
@@ -203,3 +210,41 @@ def list_approvals(
     if status:
         q = q.filter(models.Approval.status == status)
     return q.order_by(models.Approval.requested_at.desc()).all()
+
+
+# ── Package family groups (LLM-computed) ────────────────────────────────────
+
+def upsert_family_groups(db: Session, ait_id: str, groups: list) -> None:
+    """Store LLM-assigned package-family mappings. Upserts by (ait_id, package)."""
+    for g in groups:
+        family = g.get("family", "")
+        reason = g.get("reason", "")
+        for pkg in g.get("packages", []):
+            existing = (
+                db.query(models.PackageFamilyGroup)
+                .filter(
+                    models.PackageFamilyGroup.ait_id == ait_id,
+                    models.PackageFamilyGroup.package == pkg,
+                )
+                .first()
+            )
+            if existing:
+                existing.family_group = family
+                existing.family_reason = reason
+                existing.computed_at = datetime.utcnow()
+            else:
+                db.add(models.PackageFamilyGroup(
+                    ait_id=ait_id, package=pkg,
+                    family_group=family, family_reason=reason,
+                ))
+    db.commit()
+
+
+def get_family_group_map(db: Session, ait_id: str) -> dict:
+    """Returns {package: family_group} for all LLM-grouped packages in an AIT."""
+    rows = (
+        db.query(models.PackageFamilyGroup)
+        .filter(models.PackageFamilyGroup.ait_id == ait_id)
+        .all()
+    )
+    return {r.package: r.family_group for r in rows}

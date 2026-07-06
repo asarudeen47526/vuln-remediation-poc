@@ -38,7 +38,7 @@ _executor = ThreadPoolExecutor(max_workers=4)
 
 # ─── helpers ────────────────────────────────────────────────────────────────
 
-def _finding_to_dict(f: models.Finding) -> dict:
+def _finding_to_dict(f: models.Finding, family_group: str = "") -> dict:
     plan = None
     if f.remediation_plan:
         rp = f.remediation_plan
@@ -81,6 +81,7 @@ def _finding_to_dict(f: models.Finding) -> dict:
         "plan": plan,
         "pending_rollback_token": pending_token,
         "approved_rollback_token": approved_token,
+        "family_group": family_group,
         "created_at": f.created_at.isoformat() if f.created_at else None,
         "updated_at": f.updated_at.isoformat() if f.updated_at else None,
     }
@@ -191,7 +192,8 @@ def list_findings(
     if not crud.get_application(db, ait_id):
         raise HTTPException(404, "Application not found")
     findings = crud.list_findings(db, ait_id, category=category, status=status)
-    return [_finding_to_dict(f) for f in findings]
+    fgmap = crud.get_family_group_map(db, ait_id)
+    return [_finding_to_dict(f, fgmap.get(f.package, "")) for f in findings]
 
 
 @app.post("/api/v1/applications/{ait_id}/import")
@@ -229,12 +231,17 @@ async def import_scan(
         obj = crud.create_finding(db, scan.id, ait_id, f, category)
         total += 1
         if category == "npt":
-            # No fix exists — mark plan as not applicable immediately; no LLM call needed
             crud.upsert_plan(db, obj.id, None, "No fix available (NPT finding — no fixed version published).")
             crud.update_finding(db, obj.id, plan_status="na")
         else:
-            # Submit to thread pool so the LLM subprocess doesn't block the event loop
             _executor.submit(_gen_plan_bg, obj.id)
+
+    # Auto-trigger analysis and LLM grouping in background as soon as findings are imported
+    if total > 0:
+        pkgs = sorted({f["package"] for f in raw if f.get("package")})
+        _executor.submit(_run_analysis_bg, ait_id)
+        if pkgs:
+            _executor.submit(_compute_groups_bg, ait_id, pkgs)
 
     return {"scan_id": scan.id, "imported": total, "ait_id": ait_id}
 
@@ -274,6 +281,88 @@ def generate_plans(ait_id: str, db: Session = Depends(get_db)):
             _executor.submit(_gen_plan_bg, f.id)
             submitted += 1
     return {"submitted": submitted, "ait_id": ait_id}
+
+
+def _compute_groups_bg(ait_id: str, packages: list) -> None:
+    """Call LLM to group packages into logical families; store results in DB."""
+    import re
+    from llm_client import generate
+
+    SYSTEM = (
+        "You are a software security expert. Your job is to group security findings "
+        "into logical families based on shared technology, component, or update action. "
+        "A family is a set of packages/items that belong to the same technology "
+        "ecosystem, share a common source, or are updated together in one operation. "
+        "Consider: shared source packages, library + runtime/dev variants, "
+        "application + modules/plugins, language interpreters + standard libraries. "
+        "This applies to all finding types: OS packages (RPM/deb), Python/Node/Java libs, "
+        "and NPT items (no-fix vulnerabilities) — group by their core technology. "
+        "Respond ONLY with valid JSON. No prose, no markdown fences."
+    )
+    USER = (
+        "Group these security findings into logical update families.\n\n"
+        "Rules:\n"
+        "- Group by shared technology/component "
+        "(e.g. nginx + nginx-mod-* → 'nginx'; openssl + openssl-libs → 'openssl')\n"
+        "- Library with runtime/dev variants belong together\n"
+        "- Application modules/plugins belong with their parent "
+        "(e.g. httpd + mod_ssl → 'httpd')\n"
+        "- Language interpreter + stdlib belong together "
+        "(e.g. python3 + python3-libs → 'python3')\n"
+        "- NPT items (no-fix) should also be grouped by their core technology\n"
+        "- A package with no relatives is its own single-item family\n"
+        "- Every item must appear in exactly one group\n"
+        "- Family name = the base/root package or technology name (lowercase)\n\n"
+        f"Items to group:\n{json.dumps(packages)}\n\n"
+        "Return only JSON (no markdown):\n"
+        '{\n'
+        '  "groups": [\n'
+        '    {\n'
+        '      "family": "nginx",\n'
+        '      "reason": "nginx and all nginx-mod-* share source RPM and version, updated atomically",\n'
+        '      "packages": ["nginx", "nginx-mod-http-image-filter", "nginx-mod-stream"]\n'
+        '    }\n'
+        '  ]\n'
+        '}'
+    )
+
+    db = SessionLocal()
+    try:
+        raw = generate(SYSTEM, USER).strip()
+        # Strip markdown code fences the LLM may have added
+        raw = re.sub(r"^```(?:json)?\s*", "", raw)
+        raw = re.sub(r"\s*```$", "", raw.rstrip())
+        data = json.loads(raw)
+        groups = data.get("groups", [])
+
+        # Ensure every package in our list is assigned (LLM may miss some)
+        assigned = {pkg for g in groups for pkg in g.get("packages", [])}
+        for pkg in packages:
+            if pkg not in assigned:
+                groups.append({"family": pkg, "reason": "not grouped by LLM", "packages": [pkg]})
+
+        crud.upsert_family_groups(db, ait_id, groups)
+    except Exception as exc:
+        # Fallback: each package is its own family
+        fallback = [{"family": p, "reason": f"LLM unavailable: {exc}", "packages": [p]}
+                    for p in packages]
+        crud.upsert_family_groups(db, ait_id, fallback)
+    finally:
+        db.close()
+
+
+@app.post("/api/v1/applications/{ait_id}/compute-groups")
+def compute_groups(ait_id: str, db: Session = Depends(get_db)):
+    """Ask the LLM to intelligently group packages into logical update families."""
+    if not crud.get_application(db, ait_id):
+        raise HTTPException(404, "Application not found")
+    findings = crud.list_findings(db, ait_id)
+    packages = sorted({f.package for f in findings if f.package})
+    if not packages:
+        return {"status": "ok", "message": "No packages to group", "packages": 0}
+    _executor.submit(_compute_groups_bg, ait_id, packages)
+    return {"status": "computing", "packages": len(packages),
+            "message": f"LLM grouping {len(packages)} package(s) in background"}
 
 
 @app.post("/api/v1/findings/{finding_id}/remediate")

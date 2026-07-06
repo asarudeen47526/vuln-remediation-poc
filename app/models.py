@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Boolean, Text, DateTime, ForeignKey, JSON
+from sqlalchemy import Column, Integer, String, Boolean, Text, DateTime, ForeignKey, JSON, UniqueConstraint
 from sqlalchemy.orm import relationship
 from .database import Base
 
@@ -113,3 +113,16 @@ class Approval(Base):
     responded_at = Column(DateTime)
 
     finding = relationship("Finding", back_populates="approvals")
+
+
+class PackageFamilyGroup(Base):
+    """LLM-computed family groupings: maps each package to its logical family."""
+    __tablename__ = "package_family_groups"
+    __table_args__ = (UniqueConstraint("ait_id", "package", name="uq_pfg_ait_package"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    ait_id = Column(String(50), nullable=False, index=True)
+    package = Column(String(255), nullable=False)
+    family_group = Column(String(255), nullable=False)
+    family_reason = Column(Text)
+    computed_at = Column(DateTime, default=datetime.utcnow)
