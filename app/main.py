@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 # because uvicorn is run from the project root.
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from config import AI_ENABLED, ALLOWED_ACTIONS, DRY_RUN, HEALTH_URL, PLAYBOOK, SSH_KEY, SSH_USER, TARGET_HOST
+from config import AI_ENABLED, ALLOWED_ACTIONS, DRY_RUN, HEALTH_URL, PLAYBOOK, PLAYBOOK_MAP, SSH_KEY, SSH_USER, TARGET_HOST
 
 from . import crud, models, schemas
 from .database import Base, SessionLocal, engine, get_db
@@ -657,18 +657,21 @@ def remediate(finding_id: int, db: Session = Depends(get_db)):
         "severity": f.severity,
     }
 
-    if DRY_RUN:
+    from remediation_core import audit, build_ansible_cmd, select_playbook
+
+    if plan.get("action") == "manual_required":
+        output = (
+            f"[MANUAL REQUIRED] install_method={plan.get('install_method', 'unknown')}\n"
+            + (plan.get("manual_steps") or plan.get("remediation_strategy") or "See plan details.")
+        )
         rc = 0
-        output = "[DRY_RUN] ansible-playbook skipped"
+    elif DRY_RUN:
+        rc = 0
+        output = f"[DRY_RUN] ansible-playbook skipped (method={plan.get('install_method','dnf')})"
     else:
-        services_str = ",".join(plan.get("services_to_restart") or [])
-        cmd = [
-            "ansible-playbook", "-i", f"{TARGET_HOST},", PLAYBOOK,
-            "-u", SSH_USER, "--private-key", SSH_KEY,
-            "-e", f"pkg={plan['package']}",
-            "-e", f"health_url={HEALTH_URL}",
-            "-e", f"services_to_restart={services_str}",
-        ]
+        cmd = build_ansible_cmd(plan)
+        if not cmd:
+            raise HTTPException(500, f"No playbook for install_method={plan.get('install_method')}")
         result = subprocess.run(cmd, capture_output=True, text=True)
         rc = result.returncode
         output = result.stdout + result.stderr
@@ -678,7 +681,6 @@ def remediate(finding_id: int, db: Session = Depends(get_db)):
     crud.update_finding(db, finding_id, status=new_status)
     crud.create_action(db, finding_id, f.ait_id, "remediate", success=success, output=output)
 
-    from remediation_core import audit
     audit("web-ui", finding_dict, plan, "success" if success else "failed_rolled_back")
 
     return {"success": success, "status": new_status, "rc": rc, "output": output[:500]}
@@ -700,18 +702,21 @@ def remediate_bulk(ait_id: str, data: schemas.BulkRemediateRequest, db: Session 
     if not rep:
         raise HTTPException(400, "No validated plan available in this group")
     plan = rep.remediation_plan.plan_json
-    if DRY_RUN:
+    from remediation_core import build_ansible_cmd
+
+    if plan.get("action") == "manual_required":
+        output = (
+            f"[MANUAL REQUIRED] install_method={plan.get('install_method', 'unknown')}\n"
+            + (plan.get("manual_steps") or plan.get("remediation_strategy") or "See plan details.")
+        )
         rc = 0
-        output = f"[DRY_RUN] ansible-playbook skipped — would update {plan['package']}"
+    elif DRY_RUN:
+        rc = 0
+        output = f"[DRY_RUN] ansible-playbook skipped — method={plan.get('install_method','dnf')} pkg={plan['package']}"
     else:
-        services_str = ",".join(plan.get("services_to_restart") or [])
-        cmd = [
-            "ansible-playbook", "-i", f"{TARGET_HOST},", PLAYBOOK,
-            "-u", SSH_USER, "--private-key", SSH_KEY,
-            "-e", f"pkg={plan['package']}",
-            "-e", f"health_url={HEALTH_URL}",
-            "-e", f"services_to_restart={services_str}",
-        ]
+        cmd = build_ansible_cmd(plan)
+        if not cmd:
+            raise HTTPException(500, f"No playbook for install_method={plan.get('install_method')}")
         result = subprocess.run(cmd, capture_output=True, text=True)
         rc = result.returncode
         output = result.stdout + result.stderr

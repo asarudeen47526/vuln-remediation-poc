@@ -1,0 +1,145 @@
+---
+# RHEL advisory-targeted patch playbook.
+#
+# Applies exactly the packages Red Hat certified for a specific RHSA advisory
+# using:  dnf upgrade --advisory <RHSA-id>
+#
+# This is the PREFERRED patching method on RHEL because:
+#   - Applies only the CVE-fixing package set Red Hat tested together
+#   - Avoids pulling in unrelated upgrades
+#   - Produces a clean dnf history entry tied to the advisory ID
+#   - Rollback is deterministic:  dnf history undo last
+#
+# Variables:
+#   pkg                 — package name (used for pre/post version recording)
+#   advisory            — RHSA ID, e.g. "RHSA-2024:1234"  (required)
+#   health_url          — application health endpoint for smoke test
+#   services_to_restart — comma-separated systemd service names
+#
+# Rollback: dnf history undo last (fires automatically in the rescue block).
+
+- name: Remediate RHEL vulnerability via RHSA advisory
+  hosts: all
+  become: true
+  gather_facts: true          # needed for ansible_distribution_major_version
+  vars:
+    pkg: ""
+    advisory: ""
+    health_url: "http://localhost/health"
+    services_to_restart: ""
+
+  tasks:
+    - name: Require advisory ID
+      ansible.builtin.fail:
+        msg: "advisory variable is empty — pass -e advisory=RHSA-yyyy:nnnn"
+      when: advisory | length == 0
+
+    - name: Require RHEL 7, 8, or 9
+      ansible.builtin.fail:
+        msg: "This playbook targets RHEL 7/8/9; detected {{ ansible_distribution }} {{ ansible_distribution_version }}"
+      when: ansible_distribution != "RedHat" or ansible_distribution_major_version | int not in [7, 8, 9]
+
+    - name: Record pre-patch version
+      ansible.builtin.command: "rpm -q --queryformat '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n' {{ pkg }}"
+      register: pre_version
+      changed_when: false
+      failed_when: false
+
+    - ansible.builtin.debug:
+        msg: "Pre-patch: {{ pre_version.stdout | default('not installed') }}"
+
+    - name: Apply advisory and validate
+      block:
+        - name: Apply RHSA advisory (targeted upgrade)
+          ansible.builtin.command:
+            cmd: "dnf upgrade --advisory {{ advisory }} -y"
+          register: dnf_result
+
+        - ansible.builtin.debug:
+            msg: "{{ dnf_result.stdout_lines | default([]) }}"
+
+        - name: Restart services listed in plan
+          ansible.builtin.systemd:
+            name: "{{ item }}"
+            state: restarted
+            daemon_reload: false
+          loop: "{{ services_to_restart.split(',') | select | list }}"
+          when: services_to_restart | length > 0
+
+        - name: Query services needing restart after patch (needs-restarting)
+          ansible.builtin.command: "needs-restarting -s"
+          register: needs_restart_out
+          changed_when: false
+          failed_when: false
+
+        - name: Restart any additional services identified by needs-restarting
+          ansible.builtin.systemd:
+            name: "{{ item }}"
+            state: restarted
+            daemon_reload: false
+          loop: "{{ needs_restart_out.stdout_lines | default([]) | select | list }}"
+          when:
+            - needs_restart_out.rc == 0
+            - item not in (services_to_restart.split(',') | select | list)
+          ignore_errors: true
+
+        - name: Check if reboot is required (needs-restarting -r)
+          ansible.builtin.command: "needs-restarting -r"
+          register: reboot_check
+          changed_when: false
+          failed_when: false
+
+        - ansible.builtin.debug:
+            msg: "Reboot required: {{ reboot_check.rc == 1 }}"
+
+        - name: Smoke test — application health endpoint
+          ansible.builtin.uri:
+            url: "{{ health_url }}"
+            status_code: 200
+          register: health
+          retries: 5
+          delay: 5
+          until: health.status == 200
+
+        - name: Record post-patch version
+          ansible.builtin.command: "rpm -q --queryformat '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n' {{ pkg }}"
+          register: post_version
+          changed_when: false
+
+        - ansible.builtin.debug:
+            msg: "Post-patch: {{ post_version.stdout }}"
+
+        - name: Confirm advisory is no longer listed in updateinfo
+          ansible.builtin.command: "dnf updateinfo list security {{ pkg }}"
+          register: post_updateinfo
+          changed_when: false
+          failed_when: false
+
+        - ansible.builtin.debug:
+            msg: >
+              Advisory {{ advisory }} still listed: {{
+                advisory in (post_updateinfo.stdout | default(''))
+              }}
+
+      rescue:
+        - name: Roll back last dnf transaction
+          ansible.builtin.command: "dnf -y history undo last"
+
+        - name: Restart services after rollback
+          ansible.builtin.systemd:
+            name: "{{ item }}"
+            state: restarted
+          loop: "{{ services_to_restart.split(',') | select | list }}"
+          when: services_to_restart | length > 0
+
+        - name: Confirm rollback version
+          ansible.builtin.command: "rpm -q --queryformat '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n' {{ pkg }}"
+          register: rollback_version
+          changed_when: false
+        - ansible.builtin.debug:
+            msg: "Rolled back to: {{ rollback_version.stdout }}"
+
+        - ansible.builtin.fail:
+            msg: >
+              Smoke test failed for advisory {{ advisory }} ({{ pkg }}).
+              Rolled back automatically via 'dnf history undo last'.

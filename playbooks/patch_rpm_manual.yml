@@ -1,0 +1,97 @@
+---
+# Remediate a package that is in the RPM DB but has no associated repo
+# (installed via rpm -i <file.rpm> manually).
+#
+# Strategy:
+#   1. If rpm_url is provided  → download newer .rpm → rpm -U
+#   2. If rpm_url is empty     → attempt dnf update as best-effort fallback
+#      (works if the repo was added later; fails gracefully if not)
+#
+# Variables: pkg, rpm_url (optional), health_url, services_to_restart
+- name: Remediate vulnerability — manually installed RPM
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    pkg: ""
+    rpm_url: ""
+    health_url: "http://localhost/health"
+    services_to_restart: ""
+
+  tasks:
+    - name: Refuse to run without a package
+      ansible.builtin.fail:
+        msg: "No package specified (pass -e pkg=<name>)."
+      when: pkg | length == 0
+
+    - name: Record pre-patch version
+      ansible.builtin.command: "rpm -q {{ pkg }}"
+      register: pre_version
+      changed_when: false
+      failed_when: false
+
+    - ansible.builtin.debug:
+        msg: "Pre-patch: {{ pre_version.stdout | default('not installed') }}"
+
+    - name: Remediate and validate
+      block:
+        - name: Download newer RPM
+          ansible.builtin.get_url:
+            url: "{{ rpm_url }}"
+            dest: "/tmp/{{ pkg }}-update.rpm"
+            mode: "0644"
+          when: rpm_url | length > 0
+
+        - name: Upgrade via rpm -U (when rpm_url provided)
+          ansible.builtin.command: "rpm -U --oldpackage /tmp/{{ pkg }}-update.rpm"
+          when: rpm_url | length > 0
+
+        - name: Try dnf update as fallback (no rpm_url)
+          ansible.builtin.dnf:
+            name: "{{ pkg }}"
+            state: latest
+          when: rpm_url | length == 0
+
+        - name: Restart affected services
+          ansible.builtin.systemd:
+            name: "{{ item }}"
+            state: restarted
+          loop: "{{ services_to_restart.split(',') | select | list }}"
+          when: services_to_restart | length > 0
+
+        - name: Smoke test — application health
+          ansible.builtin.uri:
+            url: "{{ health_url }}"
+            status_code: 200
+          register: health
+          retries: 3
+          delay: 5
+          until: health.status == 200
+
+        - name: Record post-patch version
+          ansible.builtin.command: "rpm -q {{ pkg }}"
+          register: post_version
+          changed_when: false
+        - ansible.builtin.debug:
+            msg: "Post-patch: {{ post_version.stdout }}"
+
+      rescue:
+        - name: Roll back via dnf history undo (best effort)
+          ansible.builtin.command: "dnf -y history undo last"
+          ignore_errors: true
+
+        - name: Clean up temp RPM
+          ansible.builtin.file:
+            path: "/tmp/{{ pkg }}-update.rpm"
+            state: absent
+          ignore_errors: true
+
+        - name: Restart services after rollback
+          ansible.builtin.systemd:
+            name: "{{ item }}"
+            state: restarted
+          loop: "{{ services_to_restart.split(',') | select | list }}"
+          when: services_to_restart | length > 0
+
+        - ansible.builtin.fail:
+            msg: "Smoke test failed for {{ pkg }} — attempted rollback."

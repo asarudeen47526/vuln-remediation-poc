@@ -1,0 +1,60 @@
+---
+# Remediate a Ruby gem.
+# Variables: pkg, health_url, services_to_restart
+- name: Remediate vulnerability — Ruby gem
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    pkg: ""
+    health_url: "http://localhost/health"
+    services_to_restart: ""
+
+  tasks:
+    - name: Record pre-upgrade version
+      ansible.builtin.command: "gem list {{ pkg }}"
+      register: pre_version
+      changed_when: false
+      failed_when: false
+
+    - ansible.builtin.debug:
+        msg: "Pre-upgrade: {{ pre_version.stdout | default('not found') }}"
+
+    - name: Upgrade and validate
+      block:
+        - name: Update gem
+          ansible.builtin.command: "gem update {{ pkg }}"
+
+        - name: Restart affected services
+          ansible.builtin.systemd:
+            name: "{{ item }}"
+            state: restarted
+          loop: "{{ services_to_restart.split(',') | select | list }}"
+          when: services_to_restart | length > 0
+
+        - name: Smoke test — application health
+          ansible.builtin.uri:
+            url: "{{ health_url }}"
+            status_code: 200
+          register: health
+          retries: 3
+          delay: 5
+          until: health.status == 200
+
+        - name: Record post-upgrade version
+          ansible.builtin.command: "gem list {{ pkg }}"
+          register: post_version
+          changed_when: false
+        - ansible.builtin.debug:
+            msg: "Post-upgrade: {{ post_version.stdout }}"
+
+      rescue:
+        - name: Restart services after failure
+          ansible.builtin.systemd:
+            name: "{{ item }}"
+            state: restarted
+          loop: "{{ services_to_restart.split(',') | select | list }}"
+          when: services_to_restart | length > 0
+
+        - ansible.builtin.fail:
+            msg: "Smoke test failed for gem:{{ pkg }}."

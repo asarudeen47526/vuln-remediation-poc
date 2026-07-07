@@ -1,0 +1,121 @@
+---
+# RHEL standard dnf update playbook.
+#
+# Used when a package is tracked by dnf but no RHSA advisory has been
+# published yet (method=dnf).  When an RHSA advisory is available, use
+# patch_dnf_advisory.yml instead — it is more targeted and safer.
+#
+# Variables:
+#   pkg                 — package name
+#   health_url          — application health endpoint
+#   services_to_restart — comma-separated systemd service names (from plan)
+
+- name: Remediate RHEL vulnerability — dnf update
+  hosts: all
+  become: true
+  gather_facts: true
+  vars:
+    pkg: ""
+    health_url: "http://localhost/health"
+    services_to_restart: ""
+
+  tasks:
+    - name: Require a package name
+      ansible.builtin.fail:
+        msg: "No package specified (pass -e pkg=<name>)."
+      when: pkg | length == 0
+
+    - name: Require RHEL 7, 8, or 9
+      ansible.builtin.fail:
+        msg: "This playbook targets RHEL 7/8/9; detected {{ ansible_distribution }} {{ ansible_distribution_version }}"
+      when: ansible_distribution != "RedHat" or ansible_distribution_major_version | int not in [7, 8, 9]
+
+    - name: Record pre-patch version
+      ansible.builtin.command: "rpm -q --queryformat '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n' {{ pkg }}"
+      register: pre_version
+      changed_when: false
+      failed_when: false
+
+    - ansible.builtin.debug:
+        msg: "Pre-patch: {{ pre_version.stdout | default('not installed') }}"
+
+    - name: Patch and validate
+      block:
+        - name: Update package (security updates only when available)
+          ansible.builtin.dnf:
+            name: "{{ pkg }}"
+            state: latest
+            security: true      # prefer security-tagged updates; falls back to latest
+          register: dnf_result
+
+        - ansible.builtin.debug:
+            msg: "{{ dnf_result.results | default([]) }}"
+
+        - name: Restart services listed in plan
+          ansible.builtin.systemd:
+            name: "{{ item }}"
+            state: restarted
+            daemon_reload: false
+          loop: "{{ services_to_restart.split(',') | select | list }}"
+          when: services_to_restart | length > 0
+
+        - name: Detect additional services needing restart (needs-restarting)
+          ansible.builtin.command: "needs-restarting -s"
+          register: needs_restart_out
+          changed_when: false
+          failed_when: false
+
+        - name: Restart additional services from needs-restarting
+          ansible.builtin.systemd:
+            name: "{{ item }}"
+            state: restarted
+          loop: "{{ needs_restart_out.stdout_lines | default([]) | select | list }}"
+          when:
+            - needs_restart_out.rc == 0
+            - item not in (services_to_restart.split(',') | select | list)
+          ignore_errors: true
+
+        - name: Check reboot requirement (needs-restarting -r)
+          ansible.builtin.command: "needs-restarting -r"
+          register: reboot_check
+          changed_when: false
+          failed_when: false
+        - ansible.builtin.debug:
+            msg: "Reboot required: {{ reboot_check.rc == 1 }}"
+
+        - name: Smoke test — application health
+          ansible.builtin.uri:
+            url: "{{ health_url }}"
+            status_code: 200
+          register: health
+          retries: 5
+          delay: 5
+          until: health.status == 200
+
+        - name: Record post-patch version
+          ansible.builtin.command: "rpm -q --queryformat '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n' {{ pkg }}"
+          register: post_version
+          changed_when: false
+        - ansible.builtin.debug:
+            msg: "Post-patch: {{ post_version.stdout }}"
+
+      rescue:
+        - name: Roll back last dnf transaction
+          ansible.builtin.command: "dnf -y history undo last"
+
+        - name: Restart services after rollback
+          ansible.builtin.systemd:
+            name: "{{ item }}"
+            state: restarted
+          loop: "{{ services_to_restart.split(',') | select | list }}"
+          when: services_to_restart | length > 0
+
+        - name: Confirm rollback version
+          ansible.builtin.command: "rpm -q --queryformat '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n' {{ pkg }}"
+          register: rollback_version
+          changed_when: false
+        - ansible.builtin.debug:
+            msg: "Rolled back to: {{ rollback_version.stdout }}"
+
+        - ansible.builtin.fail:
+            msg: "Smoke test failed for {{ pkg }} — rolled back automatically via 'dnf history undo last'."

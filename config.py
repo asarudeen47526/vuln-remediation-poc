@@ -58,7 +58,35 @@ def ssh_opts(jump_host: str = "") -> list:
 HEALTH_URL = os.getenv("HEALTH_URL", "http://localhost/health")
 
 # --- Safety: the only actions the agent is ever allowed to execute ----------
-ALLOWED_ACTIONS = {"update_package", "downgrade_package"}
+# manual_required = cannot be automated; agent prints instructions for operator
+ALLOWED_ACTIONS = {"update_package", "downgrade_package", "manual_required"}
+
+# --- Playbook routing by install method -------------------------------------
+# Maps install_method (returned by LLM plan + server_inspector) to the Ansible
+# playbook that knows how to remediate it.  None = cannot be automated.
+_PLAYBOOKS_DIR = os.path.join(os.path.dirname(__file__), "playbooks")
+PLAYBOOK_MAP = {
+    # ── RHEL-native — air-gapped: all updates from local DNF repos ───────────
+    # AppStream module stream update (RHEL 8/9): dnf module update <module>:<stream>
+    "dnf_module":   os.path.join(_PLAYBOOKS_DIR, "patch_dnf_module.yml"),
+    # Standard dnf update against local repo: dnf update <pkg>
+    "dnf":          os.path.join(_PLAYBOOKS_DIR, "patch_dnf.yml"),
+    # RPM in DB but no enabled local repo: install newer .rpm from internal source
+    "rpm_manual":   os.path.join(_PLAYBOOKS_DIR, "patch_rpm_manual.yml"),
+    # Advisory-targeted patching requires Red Hat CDN — disabled (air-gapped)
+    "dnf_advisory": None,
+    # ── Application-level package managers ──────────────────────────────────
+    "pip":          os.path.join(_PLAYBOOKS_DIR, "patch_pip.yml"),
+    "npm":          os.path.join(_PLAYBOOKS_DIR, "patch_npm.yml"),
+    "gem":          os.path.join(_PLAYBOOKS_DIR, "patch_gem.yml"),
+    # ── Cannot be automated — operator must follow manual_steps ─────────────
+    "scl":          None,   # Red Hat Software Collections (RHEL 7)
+    "tarball":      None,
+    "source":       None,
+    "vendor":       None,
+    "container":    None,
+    "unknown":      None,
+}
 SEVERITIES = {"HIGH", "CRITICAL"}
 
 # --- Local testing ----------------------------------------------------------

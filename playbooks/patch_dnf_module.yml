@@ -1,0 +1,121 @@
+---
+# RHEL 8/9 AppStream module stream update playbook.
+#
+# On RHEL 8/9, packages like python, nodejs, ruby, php, postgresql are delivered
+# as module streams.  A plain 'dnf update <pkg>' can silently do nothing if the
+# package is pinned to a module stream.  The correct command is:
+#
+#   dnf module update <module>:<stream>   (e.g. dnf module update python39:3.9)
+#
+# Variables:
+#   pkg            — RPM package name (for version recording)
+#   module_stream  — module:stream string, e.g. "nodejs:18"  (required)
+#   advisory       — RHSA ID if available (optional — added as --advisory flag)
+#   health_url     — application health endpoint
+#   services_to_restart — comma-separated systemd service names
+
+- name: Remediate RHEL AppStream module-stream package
+  hosts: all
+  become: true
+  gather_facts: true
+  vars:
+    pkg: ""
+    module_stream: ""
+    advisory: ""
+    health_url: "http://localhost/health"
+    services_to_restart: ""
+
+  tasks:
+    - name: Require module_stream
+      ansible.builtin.fail:
+        msg: "module_stream is required (e.g. -e module_stream=nodejs:18)"
+      when: module_stream | length == 0
+
+    - name: Require RHEL 8 or 9 for AppStream modules
+      ansible.builtin.fail:
+        msg: "AppStream modules require RHEL 8 or 9; detected {{ ansible_distribution }} {{ ansible_distribution_version }}"
+      when: ansible_distribution != "RedHat" or ansible_distribution_major_version | int not in [8, 9]
+
+    - name: Record pre-update version
+      ansible.builtin.command: "rpm -q --queryformat '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n' {{ pkg }}"
+      register: pre_version
+      changed_when: false
+      failed_when: false
+
+    - ansible.builtin.debug:
+        msg: "Pre-update: {{ pre_version.stdout | default('not installed') }}"
+
+    - name: Update module stream and validate
+      block:
+        - name: Update AppStream module (advisory-targeted if RHSA available)
+          ansible.builtin.command:
+            cmd: >
+              dnf module update {{ module_stream }} -y
+              {% if advisory | length > 0 %}--advisory {{ advisory }}{% endif %}
+          register: dnf_result
+
+        - ansible.builtin.debug:
+            msg: "{{ dnf_result.stdout_lines | default([]) }}"
+
+        - name: Restart services listed in plan
+          ansible.builtin.systemd:
+            name: "{{ item }}"
+            state: restarted
+          loop: "{{ services_to_restart.split(',') | select | list }}"
+          when: services_to_restart | length > 0
+
+        - name: Check for additional services needing restart
+          ansible.builtin.command: "needs-restarting -s"
+          register: needs_restart_out
+          changed_when: false
+          failed_when: false
+
+        - name: Restart additional services identified by needs-restarting
+          ansible.builtin.systemd:
+            name: "{{ item }}"
+            state: restarted
+          loop: "{{ needs_restart_out.stdout_lines | default([]) | select | list }}"
+          when:
+            - needs_restart_out.rc == 0
+            - item not in (services_to_restart.split(',') | select | list)
+          ignore_errors: true
+
+        - name: Check reboot requirement
+          ansible.builtin.command: "needs-restarting -r"
+          register: reboot_check
+          changed_when: false
+          failed_when: false
+        - ansible.builtin.debug:
+            msg: "Reboot required: {{ reboot_check.rc == 1 }}"
+
+        - name: Smoke test — application health
+          ansible.builtin.uri:
+            url: "{{ health_url }}"
+            status_code: 200
+          register: health
+          retries: 5
+          delay: 5
+          until: health.status == 200
+
+        - name: Record post-update version
+          ansible.builtin.command: "rpm -q --queryformat '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n' {{ pkg }}"
+          register: post_version
+          changed_when: false
+        - ansible.builtin.debug:
+            msg: "Post-update: {{ post_version.stdout }}"
+
+      rescue:
+        - name: Roll back last dnf transaction
+          ansible.builtin.command: "dnf -y history undo last"
+
+        - name: Restart services after rollback
+          ansible.builtin.systemd:
+            name: "{{ item }}"
+            state: restarted
+          loop: "{{ services_to_restart.split(',') | select | list }}"
+          when: services_to_restart | length > 0
+
+        - ansible.builtin.fail:
+            msg: >
+              Smoke test failed for module {{ module_stream }} ({{ pkg }}).
+              Rolled back automatically via 'dnf history undo last'.

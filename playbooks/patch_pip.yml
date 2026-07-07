@@ -1,0 +1,79 @@
+---
+# Remediate a Python package installed via pip / pip3.
+# The pip package name may differ from the CVE/RPM name — use pip_package
+# if they differ, otherwise pkg is used for both.
+#
+# Variables: pkg, pip_package (optional), pip_exe (default pip3),
+#            health_url, services_to_restart
+- name: Remediate vulnerability — pip-installed Python package
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    pkg: ""
+    pip_package: ""        # pip package name if different from pkg
+    pip_exe: "pip3"
+    health_url: "http://localhost/health"
+    services_to_restart: ""
+
+  tasks:
+    - name: Resolve effective pip package name
+      ansible.builtin.set_fact:
+        _pip_pkg: "{{ pip_package if pip_package | length > 0 else pkg }}"
+
+    - name: Record pre-upgrade version
+      ansible.builtin.command: "{{ pip_exe }} show {{ _pip_pkg }}"
+      register: pre_version
+      changed_when: false
+      failed_when: false
+
+    - ansible.builtin.debug:
+        msg: "Pre-upgrade:\n{{ pre_version.stdout | default('not found') }}"
+
+    - name: Parse current version for potential rollback
+      ansible.builtin.set_fact:
+        _prev_ver: "{{ pre_version.stdout | regex_search('Version: ([^\\n]+)', '\\1') | first | default('') }}"
+
+    - name: Upgrade and validate
+      block:
+        - name: Upgrade package via pip
+          ansible.builtin.command: "{{ pip_exe }} install --upgrade {{ _pip_pkg }}"
+
+        - name: Restart affected services
+          ansible.builtin.systemd:
+            name: "{{ item }}"
+            state: restarted
+          loop: "{{ services_to_restart.split(',') | select | list }}"
+          when: services_to_restart | length > 0
+
+        - name: Smoke test — application health
+          ansible.builtin.uri:
+            url: "{{ health_url }}"
+            status_code: 200
+          register: health
+          retries: 3
+          delay: 5
+          until: health.status == 200
+
+        - name: Record post-upgrade version
+          ansible.builtin.command: "{{ pip_exe }} show {{ _pip_pkg }}"
+          register: post_version
+          changed_when: false
+        - ansible.builtin.debug:
+            msg: "Post-upgrade:\n{{ post_version.stdout }}"
+
+      rescue:
+        - name: Roll back to previous version
+          ansible.builtin.command: "{{ pip_exe }} install '{{ _pip_pkg }}=={{ _prev_ver }}'"
+          when: _prev_ver | length > 0
+          ignore_errors: true
+
+        - name: Restart services after rollback
+          ansible.builtin.systemd:
+            name: "{{ item }}"
+            state: restarted
+          loop: "{{ services_to_restart.split(',') | select | list }}"
+          when: services_to_restart | length > 0
+
+        - ansible.builtin.fail:
+            msg: "Smoke test failed for pip:{{ _pip_pkg }} — attempted rollback to {{ _prev_ver }}."
