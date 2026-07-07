@@ -131,6 +131,38 @@ def seed(db):
         print("  sample_report.json not found — no findings seeded")
 
 
+def _migrate_columns(engine):
+    """Add any columns present in ORM models but missing from the live DB.
+
+    Safe to call repeatedly — each ALTER is skipped when the column already
+    exists.  Extend the list below whenever a new column is added to a model.
+    """
+    migrations = [
+        # (table, column, pg_type)
+        ("applications", "dep_report", "jsonb"),
+        ("findings",     "dep_note",   "text"),
+    ]
+    with engine.connect() as conn:
+        for table, column, pg_type in migrations:
+            exists = conn.execute(
+                __import__("sqlalchemy").text(
+                    "SELECT 1 FROM information_schema.columns "
+                    "WHERE table_name=:t AND column_name=:c"
+                ),
+                {"t": table, "c": column},
+            ).fetchone()
+            if not exists:
+                conn.execute(
+                    __import__("sqlalchemy").text(
+                        f'ALTER TABLE {table} ADD COLUMN {column} {pg_type}'
+                    )
+                )
+                conn.commit()
+                print(f"  [migrate] Added column {table}.{column} ({pg_type})")
+            else:
+                print(f"  [migrate] {table}.{column} already exists — skipped")
+
+
 def main():
     db_url = os.environ["DATABASE_URL"]
 
@@ -156,6 +188,10 @@ def main():
         print("\nEnsure PostgreSQL is running and DATABASE_URL is correct:")
         print(f"  {db_url}")
         sys.exit(1)
+
+    # Apply additive column migrations for tables that already exist.
+    # create_all() only creates missing tables — it never alters existing ones.
+    _migrate_columns(engine)
     print("  Tables ready.")
 
     # Step 3 — seed sample data
