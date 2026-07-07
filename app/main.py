@@ -205,6 +205,12 @@ def get_stats(ait_id: str, db: Session = Depends(get_db)):
     return crud.get_app_stats(db, ait_id)
 
 
+@app.get("/api/v1/config")
+def get_server_config():
+    """Expose non-secret server config flags to the UI."""
+    return {"ai_enabled": AI_ENABLED, "dry_run": DRY_RUN}
+
+
 @app.get("/api/v1/applications/{ait_id}/findings")
 def list_findings(
     ait_id: str,
@@ -259,8 +265,8 @@ async def import_scan(
         else:
             _executor.submit(_gen_plan_bg, obj.id)
 
-    # Auto-trigger analysis and LLM grouping in background as soon as findings are imported
-    if total > 0:
+    # Auto-trigger analysis and LLM grouping only when AI is enabled
+    if total > 0 and AI_ENABLED:
         pkgs = sorted({f["package"] for f in raw if f.get("package")})
         _executor.submit(_run_analysis_bg, ait_id)
         if pkgs:
@@ -307,7 +313,22 @@ def generate_plans(ait_id: str, db: Session = Depends(get_db)):
 
 
 def _compute_groups_bg(ait_id: str, packages: list) -> None:
-    """Call LLM to group packages into logical families; store results in DB."""
+    """Call LLM to group packages into logical families; store results in DB.
+
+    Skips entirely when AI_ENABLED=0 or when all packages are already grouped.
+    """
+    if not AI_ENABLED:
+        return
+
+    # Skip if every package already has a group — avoids a redundant LLM call
+    db = SessionLocal()
+    try:
+        existing_map = crud.get_family_group_map(db, ait_id)
+    finally:
+        db.close()
+    if all(p in existing_map for p in packages):
+        return
+
     import re
     from llm_client import generate
 

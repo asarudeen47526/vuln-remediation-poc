@@ -146,6 +146,7 @@ a{color:var(--accent)}
 .notif-btn{position:relative;padding:6px 10px;border-radius:var(--r);border:1px solid var(--border);cursor:pointer;background:transparent;color:var(--text2);display:flex;align-items:center;gap:4px}
 .notif-btn:hover{background:var(--surface2);color:var(--text)}
 .notif-n{background:var(--c-crit);color:#fff;font-size:10px;font-weight:700;padding:1px 5px;border-radius:20px;min-width:18px;text-align:center}
+.ai-off-badge{font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;background:rgba(107,114,128,.2);color:var(--text3);border:1px solid var(--border);cursor:default}
 .link-btn{background:none;border:none;color:var(--accent);cursor:pointer;font-size:12px;padding:0;text-decoration:underline}
 /* ── Modal ───────────────────────────────────────────────────────────── */
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(2px);z-index:100;display:flex;align-items:center;justify-content:center;padding:20px}
@@ -275,6 +276,7 @@ a{color:var(--accent)}
         <div class="header-sub" id="ait-sub"></div>
       </div>
       <div class="header-right">
+        <span class="ai-off-badge hidden" id="ai-status-badge" title="Set AI_ENABLED=1 in .env and restart to enable AI features">🤖 AI Off</span>
         <button class="btn btn-primary" id="btn-import" disabled onclick="openModal('modal-import')">↑ Import Scan</button>
         <button class="btn btn-outline" id="btn-gen-plans" disabled onclick="generateAllPlans()" title="Generate remediation plans for all open vulnerability findings">⚙ Generate Plans</button>
         <button class="btn btn-outline" id="btn-analyze" disabled onclick="openModal('modal-analyze')">🔬 Analyze</button>
@@ -476,6 +478,7 @@ const S = {
   pollTimer: null, importFile: null,
   sevFilter: '', searchQuery: '', groupedView: true,
   _lastSidebarRefresh: 0,
+  aiEnabled: true,   // updated from /api/v1/config on init
 };
 
 // ── API ────────────────────────────────────────────────────────────────────
@@ -506,7 +509,30 @@ async function apiUpload(path, file) {
 
 // ── Init ───────────────────────────────────────────────────────────────────
 async function init() {
-  try { S.apps = await api('GET','/applications'); renderSidebar(); } catch(e) {}
+  try {
+    const [apps, cfg] = await Promise.all([
+      api('GET','/applications'),
+      api('GET','/config'),
+    ]);
+    S.apps = apps;
+    S.aiEnabled = cfg.ai_enabled !== false;
+    renderSidebar();
+    renderAiStatus();
+  } catch(e) {
+    try { S.apps = await api('GET','/applications'); renderSidebar(); } catch {}
+  }
+}
+
+function renderAiStatus() {
+  const btn = document.getElementById('btn-compute-groups');
+  const badge = document.getElementById('ai-status-badge');
+  if (S.aiEnabled) {
+    if (btn) { btn.disabled = false; btn.title = 'Ask the LLM to intelligently group related packages into families'; }
+    if (badge) badge.classList.add('hidden');
+  } else {
+    if (btn) { btn.disabled = true; btn.title = 'AI is disabled (AI_ENABLED=0 in .env)'; btn.textContent = '🤖 AI: Off'; }
+    if (badge) badge.classList.remove('hidden');
+  }
 }
 
 // ── Sidebar ────────────────────────────────────────────────────────────────
@@ -704,6 +730,10 @@ function md2html(md) {
 
 function analysisColHtml(f) {
   if (!f.analysis_md) {
+    if (!S.aiEnabled) {
+      return `<div class="col-label">Agent Analysis</div>
+      <div class="no-data" style="color:var(--text3)">AI disabled<br><span style="font-size:11px">Set AI_ENABLED=1 in .env to enable</span></div>`;
+    }
     return `<div class="col-label">Agent Analysis</div>
     <div class="no-data">No analysis yet.<br>
     <button class="link-btn" onclick="runAnalysis()">Run Analysis</button></div>`;

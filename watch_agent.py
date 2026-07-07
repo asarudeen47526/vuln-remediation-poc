@@ -49,6 +49,7 @@ AIT_ID         = os.getenv("AIT_ID", "AIT-001")
 PORT           = int(os.getenv("PORT", "8080"))
 API            = f"http://localhost:{PORT}/api/v1"
 DRY_RUN        = os.getenv("DRY_RUN", "1") == "1"
+AI_ENABLED     = os.getenv("AI_ENABLED", "1") == "1"
 
 TARGET_HOST         = os.getenv("TARGET_HOST", "")
 SSH_USER            = os.getenv("SSH_USER", "aiagent")
@@ -301,24 +302,26 @@ def main() -> None:
     while True:
         # ── In DRY_RUN mode: check once if analysis is missing ────────────────
         if DRY_RUN:
-            missing = _findings_needing_analysis()
-            if missing:
-                _log(f"{len(missing)} finding(s) have no analysis — running LLM now…")
-                analysis_md = _run_analysis(SAMPLE_REPORT)
-                if analysis_md:
-                    n = _store_analysis(analysis_md)
-                    _log(f"Analysis stored for {n} CVE(s). Dashboard updated.")
-                    _save_report(analysis_md)
-                    _trigger_compute_groups()
-                else:
-                    _log("Analysis skipped (LLM unavailable). "
-                         "Use the UI '🔬 Analyze' button, or check LLM_PROVIDER in .env.")
+            if not AI_ENABLED:
+                _log("AI_ENABLED=0 — LLM analysis and grouping skipped. Dashboard still active.")
             else:
-                _log("All findings have analysis. Nothing to do this cycle.")
-                # Re-trigger grouping if not yet computed
-                _trigger_compute_groups()
+                missing = _findings_needing_analysis()
+                if missing:
+                    _log(f"{len(missing)} finding(s) have no analysis — running LLM now…")
+                    analysis_md = _run_analysis(SAMPLE_REPORT)
+                    if analysis_md:
+                        n = _store_analysis(analysis_md)
+                        _log(f"Analysis stored for {n} CVE(s). Dashboard updated.")
+                        _save_report(analysis_md)
+                        _trigger_compute_groups()
+                    else:
+                        _log("Analysis skipped (LLM unavailable). "
+                             "Use the UI '🔬 Analyze' button, or check LLM_PROVIDER in .env.")
+                else:
+                    _log("All findings have analysis. Nothing to do this cycle.")
+                    _trigger_compute_groups()
 
-            # Also kick remediation plans for any findings still pending
+            # Kick remediation plans regardless of AI_ENABLED (DRY_RUN plans need no LLM)
             submitted = _trigger_plans()
             if submitted:
                 _log(f"Triggered remediation plan generation for {submitted} finding(s).")
@@ -350,21 +353,23 @@ def main() -> None:
         if n:
             _log(f"Imported {n} finding(s). Remediation plans generating in background…")
         else:
-            # Findings may already exist; kick plan generation for any pending ones
             submitted = _trigger_plans()
             if submitted:
                 _log(f"Triggered plan generation for {submitted} existing finding(s).")
 
-        # Step 2 — LLM analysis → per-CVE analysis stored in DB
-        analysis_md = _run_analysis(report_path)
-        if analysis_md:
-            updated = _store_analysis(analysis_md)
-            _log(f"Analysis stored for {updated} CVE(s). Dashboard updated.")
-            _save_report(analysis_md)
+        # Step 2 — LLM analysis (only when AI is enabled)
+        if AI_ENABLED:
+            analysis_md = _run_analysis(report_path)
+            if analysis_md:
+                updated = _store_analysis(analysis_md)
+                _log(f"Analysis stored for {updated} CVE(s). Dashboard updated.")
+                _save_report(analysis_md)
+                _trigger_compute_groups()
+            else:
+                _log("LLM analysis skipped. Use the UI '🔬 Analyze' button when ready.")
         else:
-            _log("LLM analysis skipped. Use the UI '🔬 Analyze' button when ready.")
+            _log("AI_ENABLED=0 — LLM analysis skipped. Set AI_ENABLED=1 in .env to enable.")
 
-        _trigger_compute_groups()
         _log(f"Cycle complete. Dashboard: http://localhost:{PORT}")
         time.sleep(WATCH_INTERVAL)
 
