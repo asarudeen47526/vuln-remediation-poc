@@ -115,10 +115,21 @@ fi
 
 # ---- ensure pg_hba allows password auth from localhost (IPv4 + IPv6) -------
 PG_HBA=$(sudo -u postgres psql -Atc "SHOW hba_file" 2>/dev/null || true)
+# Fallback: scan common RHEL/OL data-directory locations when SHOW hba_file fails
+if [[ -z "$PG_HBA" ]]; then
+    for _hba in /var/lib/pgsql/data/pg_hba.conf \
+                /var/lib/pgsql/15/data/pg_hba.conf \
+                /var/lib/pgsql/14/data/pg_hba.conf \
+                /var/lib/pgsql/13/data/pg_hba.conf; do
+        if sudo test -f "$_hba" 2>/dev/null; then
+            PG_HBA="$_hba"; break
+        fi
+    done
+fi
 if [[ -n "$PG_HBA" ]]; then
     NEED_HBA=0
-    sudo grep -q "127\.0\.0\.1.*md5\|127\.0\.0\.1.*scram" "$PG_HBA" 2>/dev/null || NEED_HBA=1
-    sudo grep -q "::1.*md5\|::1.*scram"                    "$PG_HBA" 2>/dev/null || NEED_HBA=1
+    sudo grep -qE "^host[[:space:]]+all[[:space:]]+postgres[[:space:]]+127\.0\.0\.1" "$PG_HBA" 2>/dev/null || NEED_HBA=1
+    sudo grep -qE "^host[[:space:]]+all[[:space:]]+postgres[[:space:]]+::1"          "$PG_HBA" 2>/dev/null || NEED_HBA=1
     if [[ "$NEED_HBA" == "1" ]]; then
         TMP=$(mktemp)
         { echo "host    all             postgres        127.0.0.1/32            md5"
@@ -128,15 +139,19 @@ if [[ -n "$PG_HBA" ]]; then
         sudo chmod 600 "$PG_HBA"
         sudo chown postgres:postgres "$PG_HBA"
         rm -f "$TMP"
-        sudo systemctl reload "$PG_SERVICE"
+        sudo systemctl reload "$PG_SERVICE" || true
+        sleep 2   # wait for pg to apply the new auth config before we connect
         info "Updated pg_hba.conf for local password auth (IPv4 + IPv6)."
     fi
 fi
 
-# ---- set postgres OS password to match DATABASE_URL -------------------------
-PG_PASS="${DATABASE_URL:-}"
-PG_PASS="${PG_PASS##*:}"          # strip up to last colon (gets "password@host/db")
-PG_PASS="${PG_PASS%%@*}"          # strip from @ onwards  (gets "password")
+# ---- set postgres user password to match DATABASE_URL -----------------------
+# Correct URL parsing for postgresql://user:password@host:port/db
+# (##*: strips to LAST colon which would grab the port — use a two-step strip instead)
+_DB_URL="${DATABASE_URL:-postgresql://postgres:postgres@localhost:5432/vulndb}"
+_USERINFO="${_DB_URL#*://}"          # strip scheme  → "user:pass@host:port/db"
+_USERINFO="${_USERINFO%%@*}"         # strip from @  → "user:pass"
+PG_PASS="${_USERINFO#*:}"            # strip user:   → "pass"
 PG_PASS="${PG_PASS:-postgres}"
 sudo -u postgres psql -c "ALTER USER postgres PASSWORD '${PG_PASS}';" 2>/dev/null || true
 
