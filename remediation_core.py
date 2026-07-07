@@ -67,6 +67,89 @@ def parse_trivy(path: str) -> list[dict]:
     return findings
 
 
+def parse_csv(path_or_content) -> list[dict]:
+    """Parse a CSV vulnerability report into the same flat format as parse_trivy.
+
+    Accepts either a file path (str) or raw CSV text (bytes or str).
+    Flexible column matching: handles Trivy CSV exports and custom formats.
+
+    Required columns (case-insensitive, first match wins):
+      CVE      : VulnerabilityID, cve_id, CVE, cve
+      Package  : PkgName, package, Package, pkg
+      Severity : Severity, severity
+    Optional:
+      InstalledVersion, installed_version, installed, CurrentVersion -> installed
+      FixedVersion, fixed_version, fixed, TargetVersion             -> fixed
+      Target, os_target, Host, Source, target                       -> os
+      Status, status                                                -> status
+      Title, title, Description                                     -> title
+    """
+    import csv
+    import io
+
+    if isinstance(path_or_content, (bytes, bytearray)):
+        text = path_or_content.decode("utf-8-sig", errors="replace")
+    elif isinstance(path_or_content, str) and "\n" not in path_or_content and len(path_or_content) < 500:
+        # treat as file path
+        with open(path_or_content, encoding="utf-8-sig", errors="replace") as fh:
+            text = fh.read()
+    else:
+        text = path_or_content
+
+    reader = csv.DictReader(io.StringIO(text))
+    if not reader.fieldnames:
+        return []
+
+    # Build column alias map (lowercase header -> canonical key)
+    _ALIASES = {
+        "cve": "cve", "vulnerabilityid": "cve", "cve_id": "cve",
+        "package": "package", "pkgname": "package", "pkg": "package",
+        "severity": "severity",
+        "installedversion": "installed", "installed_version": "installed",
+        "installed": "installed", "currentversion": "installed",
+        "fixedversion": "fixed", "fixed_version": "fixed",
+        "fixed": "fixed", "targetversion": "fixed",
+        "target": "os", "os_target": "os", "host": "os",
+        "source": "os", "artifactname": "os",
+        "status": "status",
+        "title": "title", "description": "title",
+    }
+    col_map: dict[str, str] = {}
+    for hdr in (reader.fieldnames or []):
+        canonical = _ALIASES.get(hdr.strip().lower().replace(" ", ""))
+        if canonical and canonical not in col_map.values():
+            col_map[hdr] = canonical
+
+    findings = []
+    for row in reader:
+        mapped: dict[str, str] = {}
+        for hdr, canonical in col_map.items():
+            val = (row.get(hdr) or "").strip()
+            if val:
+                mapped[canonical] = val
+
+        cve = mapped.get("cve", "")
+        pkg = mapped.get("package", "")
+        sev = mapped.get("severity", "UNKNOWN").upper()
+        if not cve or not pkg:
+            continue
+        if sev not in SEVERITIES:
+            continue
+
+        findings.append({
+            "cve":       cve,
+            "package":   pkg,
+            "severity":  sev,
+            "installed": mapped.get("installed", ""),
+            "fixed":     mapped.get("fixed", ""),
+            "os":        mapped.get("os", ""),
+            "title":     mapped.get("title", cve),
+            "status":    mapped.get("status", ""),
+        })
+
+    return findings
+
+
 def make_plan(finding: dict, context_text: str = "") -> dict:
     ctx_block = f"\nServer context:\n{context_text}\n" if context_text else ""
     installed = finding.get("installed", "unknown")

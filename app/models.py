@@ -13,6 +13,7 @@ class Application(Base):
     owner_name = Column(String(255))
     environment = Column(String(50), default="production")
     host = Column(String(255))
+    dep_report = Column(JSON)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     findings = relationship("Finding", back_populates="application", cascade="all, delete-orphan")
@@ -50,6 +51,7 @@ class Finding(Base):
     # open | remediated | deferred | skipped | rolled_back
     status = Column(String(50), default="open")
     analysis_md = Column(Text)
+    dep_note = Column(Text)
     # pending | ready | error
     plan_status = Column(String(50), default="pending")
     created_at = Column(DateTime, default=datetime.utcnow)

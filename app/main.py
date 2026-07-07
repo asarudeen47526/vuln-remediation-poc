@@ -11,7 +11,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
-from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
@@ -27,6 +27,20 @@ from .database import Base, SessionLocal, engine, get_db
 
 # Create tables on startup
 Base.metadata.create_all(bind=engine)
+
+# Idempotent column migrations for new fields added after initial schema creation
+try:
+    from sqlalchemy import text as _sql_text
+    with engine.connect() as _conn:
+        _conn.execute(_sql_text(
+            "ALTER TABLE findings ADD COLUMN IF NOT EXISTS dep_note TEXT"
+        ))
+        _conn.execute(_sql_text(
+            "ALTER TABLE applications ADD COLUMN IF NOT EXISTS dep_report JSON"
+        ))
+        _conn.commit()
+except Exception as _me:
+    print(f"[startup] column migration skipped: {_me}")
 
 app = FastAPI(title="VulnGuard AI", version="2.0.0")
 
@@ -77,6 +91,7 @@ def _finding_to_dict(f: models.Finding, family_group: str = "") -> dict:
         "category": f.category,
         "status": f.status,
         "analysis_md": f.analysis_md,
+        "dep_info": json.loads(f.dep_note) if f.dep_note else None,
         "plan_status": f.plan_status,
         "plan": plan,
         "pending_rollback_token": pending_token,
@@ -125,8 +140,6 @@ def _gen_plan_bg(finding_id: int):
                 "reason": f"[DRY-RUN] Update {pkg} from {installed} to {fixed} to fix {cve_id}.",
                 "restore_plan": f"[DRY-RUN] dnf history undo last — restores {pkg} to {installed}.",
             }
-        elif not AI_ENABLED:
-            error = "AI disabled (AI_ENABLED=0 in .env) — set AI_ENABLED=1 to generate plans"
         else:
             plan = make_plan(finding_dict)
         if plan is not None:
@@ -225,6 +238,220 @@ def list_findings(
     return [_finding_to_dict(f, fgmap.get(f.package, "")) for f in findings]
 
 
+def _parse_trivy_report(data: dict) -> list[dict]:
+    """Parse all Trivy result classes into a unified flat list of finding dicts.
+
+    Handles: Vulnerabilities (os-pkgs / lang-pkgs), Misconfigurations (IaC/config),
+    Secrets, and Licenses. Private keys in _cat / _resolution drive category + plan.
+    """
+    raw: list[dict] = []
+    for result in data.get("Results") or []:
+        target = result.get("Target", "")
+
+        for v in result.get("Vulnerabilities") or []:
+            raw.append({
+                "cve": v.get("VulnerabilityID"),
+                "package": v.get("PkgName"),
+                "installed": v.get("InstalledVersion"),
+                "fixed": v.get("FixedVersion"),
+                "severity": v.get("Severity", "UNKNOWN"),
+                "title": v.get("Title", ""),
+                "os": target,
+                "_status": (v.get("Status") or "").lower(),
+            })
+
+        for m in result.get("Misconfigurations") or []:
+            raw.append({
+                "cve": m.get("AVDID") or m.get("ID"),
+                "package": m.get("Type", "IaC"),
+                "installed": None,
+                "fixed": None,
+                "severity": m.get("Severity", "UNKNOWN"),
+                "title": m.get("Title", ""),
+                "os": target,
+                "_cat": "other",
+                "_resolution": m.get("Resolution") or "Fix the misconfiguration as described in the check details.",
+            })
+
+        for s in result.get("Secrets") or []:
+            raw.append({
+                "cve": s.get("RuleID"),
+                "package": s.get("Category", "secret"),
+                "installed": None,
+                "fixed": None,
+                "severity": s.get("Severity", "UNKNOWN"),
+                "title": s.get("Title", ""),
+                "os": target,
+                "_cat": "secret",
+                "_resolution": "Rotate or remove the exposed credential immediately and audit all access logs.",
+            })
+
+        for lic in result.get("Licenses") or []:
+            raw.append({
+                "cve": lic.get("Name"),
+                "package": lic.get("PkgName", "unknown"),
+                "installed": lic.get("FilePath", ""),
+                "fixed": None,
+                "severity": lic.get("Severity", "UNKNOWN"),
+                "title": f"{lic.get('Name', '')} license — {lic.get('PkgName', '')}",
+                "os": target,
+                "_cat": "other",
+                "_resolution": "Review license compatibility with your legal team. Replace with a permissively-licensed alternative or obtain a commercial license.",
+            })
+
+    return raw
+
+
+def _detect_ecosystem(pkg: str, os_target: str) -> str:
+    """Return the package manager ecosystem for a finding.
+
+    Returns one of: 'os', 'maven', 'npm', 'pip', 'gem', 'other'.
+    Used to decide whether dnf/Ansible can patch this or whether a
+    build-system advisory is needed instead.
+    """
+    if ":" in pkg:                              # Maven groupId:artifactId
+        return "maven"
+    ot = (os_target or "").lower()
+    if "node-pkg" in ot or "node_modules" in ot:
+        return "npm"
+    if "python-pkg" in ot or "pip" in ot:
+        return "pip"
+    if "gem" in ot or "ruby-gems" in ot:
+        return "gem"
+    if "jar" in ot:                             # Java target not already Maven-formatted
+        return "maven"
+    return "os"
+
+
+def _app_lib_advisory(pkg: str, fixed: str, ecosystem: str) -> str:
+    """Realistic remediation text for application-bundled libraries.
+
+    These libraries are shipped inside WAR/JAR/node_modules/virtualenvs and
+    cannot be patched by dnf.  The text is stored as plan_error so the UI
+    surfaces it in the Remediation Plan column.
+    """
+    target_ver = f" to {fixed}" if fixed else ""
+    if ecosystem == "maven":
+        artifact = pkg.split(":")[-1] if ":" in pkg else pkg
+        return (
+            f"{pkg} is a Java library bundled inside your application — dnf cannot patch it. "
+            f"Steps: (1) run find /opt/app -name '{artifact}-*.jar' to confirm the version present; "
+            f"(2) update the version{target_ver} in pom.xml or build.gradle; "
+            f"(3) rebuild with 'mvn clean package -DskipTests' or 'gradle build'; "
+            f"(4) redeploy the new artifact and restart the application service; "
+            f"(5) verify with 'trivy fs --scanners vuln /opt/app'."
+        )
+    if ecosystem == "npm":
+        cmd = f"npm install {pkg}@{fixed}" if fixed else f"npm update {pkg}"
+        return (
+            f"{pkg} is a Node.js library installed via npm — dnf cannot patch it. "
+            f"Steps: (1) in your application directory run '{cmd}'; "
+            f"(2) run your test suite; "
+            f"(3) redeploy and restart the Node.js service; "
+            f"(4) verify with 'trivy fs --scanners vuln /opt/app'."
+        )
+    if ecosystem == "pip":
+        cmd = f"pip install '{pkg}=={fixed}'" if fixed else f"pip install --upgrade {pkg}"
+        return (
+            f"{pkg} is a Python package — dnf cannot patch it. "
+            f"Steps: (1) activate your virtualenv and run '{cmd}'; "
+            f"(2) run your test suite; "
+            f"(3) restart the application service to load the updated library; "
+            f"(4) verify with 'trivy fs --scanners vuln /opt/app'."
+        )
+    if ecosystem == "gem":
+        return (
+            f"{pkg} is a Ruby gem — dnf cannot patch it. "
+            f"Steps: (1) update '{pkg}'{target_ver} in your Gemfile; "
+            f"(2) run 'bundle update {pkg}'; "
+            f"(3) redeploy and restart the Ruby service."
+        )
+    return (
+        f"{pkg} is an application-bundled library{target_ver}. "
+        "Update the dependency in your build system, rebuild, and redeploy. "
+        "dnf/Ansible cannot patch this."
+    )
+
+
+def _import_to_db(db, ait_id: str, scan_id: int, raw: list[dict]) -> int:
+    """Upsert findings from a parsed report; skip any that are already in DB.
+
+    Returns count of records touched (created or updated).
+    """
+    total = 0
+    for f in raw:
+        _cat = f.get("_cat")
+        _status = f.get("_status", "")
+        if _cat == "secret":
+            category = "secret"
+        elif _cat == "other":
+            category = "other"
+        elif _cat:
+            category = _cat
+        elif _status == "end_of_life":
+            category = "eol"
+        elif not f.get("fixed"):
+            category = "npt"
+        else:
+            category = "vulnerability"
+
+        obj = crud.create_finding(db, scan_id, ait_id, f, category)
+        total += 1
+
+        if category == "eol":
+            if obj.plan_status != "na":
+                crud.upsert_plan(db, obj.id, None,
+                    "This package/runtime has reached End of Life and no longer receives security patches. "
+                    "Upgrade to a currently supported version.")
+                crud.update_finding(db, obj.id, plan_status="na")
+        elif category in ("npt", "secret", "other"):
+            if obj.plan_status != "na":
+                resolution = f.get("_resolution", "No fix available.")
+                crud.upsert_plan(db, obj.id, None, resolution)
+                crud.update_finding(db, obj.id, plan_status="na")
+        else:  # vulnerability
+            ecosystem = _detect_ecosystem(f.get("package", ""), f.get("os", ""))
+            if ecosystem == "os":
+                # OS package — Ansible/dnf pipeline applies
+                if obj.plan_status not in ("ready",) and AI_ENABLED:
+                    _executor.submit(_gen_plan_bg, obj.id)
+            else:
+                # Application-bundled library — realistic build-system advisory
+                if obj.plan_status != "na":
+                    advisory = _app_lib_advisory(
+                        f.get("package", ""), f.get("fixed", ""), ecosystem
+                    )
+                    crud.upsert_plan(db, obj.id, None, advisory)
+                    crud.update_finding(db, obj.id, plan_status="na")
+
+    return total
+
+
+def _parse_upload(content: bytes, filename: str) -> list[dict] | None:
+    """Parse uploaded file content as Trivy JSON or CSV.
+
+    Returns flat findings list compatible with _import_to_db, or None on failure.
+    """
+    name_lower = filename.lower()
+    if name_lower.endswith(".csv"):
+        from remediation_core import parse_csv
+        return parse_csv(content)
+    # Try JSON (Trivy report or fallback)
+    try:
+        data = json.loads(content)
+        return _parse_trivy_report(data)
+    except (json.JSONDecodeError, KeyError, TypeError):
+        # Last-chance: maybe it's a headerless CSV with .json extension
+        try:
+            from remediation_core import parse_csv
+            result = parse_csv(content)
+            if result:
+                return result
+        except Exception:
+            pass
+    return None
+
+
 @app.post("/api/v1/applications/{ait_id}/import")
 async def import_scan(
     ait_id: str,
@@ -235,37 +462,13 @@ async def import_scan(
         raise HTTPException(404, "Application not found")
 
     content = await file.read()
-    try:
-        data = json.loads(content)
-    except json.JSONDecodeError as exc:
-        raise HTTPException(400, f"Invalid JSON: {exc}") from exc
-
-    raw: list[dict] = []
-    for result in data.get("Results") or []:
-        for v in result.get("Vulnerabilities") or []:
-            raw.append({
-                "cve": v.get("VulnerabilityID"),
-                "package": v.get("PkgName"),
-                "installed": v.get("InstalledVersion"),
-                "fixed": v.get("FixedVersion"),
-                "severity": v.get("Severity"),
-                "title": v.get("Title", ""),
-                "os": result.get("Target", ""),
-            })
+    raw = _parse_upload(content, file.filename or "upload")
+    if raw is None:
+        raise HTTPException(400, "File must be a Trivy JSON report or a vulnerability CSV")
 
     scan = crud.create_scan(db, ait_id, file.filename or "upload.json", len(raw))
-    total = 0
-    for f in raw:
-        category = "npt" if not f.get("fixed") else "vulnerability"
-        obj = crud.create_finding(db, scan.id, ait_id, f, category)
-        total += 1
-        if category == "npt":
-            crud.upsert_plan(db, obj.id, None, "No fix available (NPT finding — no fixed version published).")
-            crud.update_finding(db, obj.id, plan_status="na")
-        else:
-            _executor.submit(_gen_plan_bg, obj.id)
+    total = _import_to_db(db, ait_id, scan.id, raw)
 
-    # Auto-trigger analysis and LLM grouping only when AI is enabled
     if total > 0 and AI_ENABLED:
         pkgs = sorted({f["package"] for f in raw if f.get("package")})
         _executor.submit(_run_analysis_bg, ait_id)
@@ -273,6 +476,36 @@ async def import_scan(
             _executor.submit(_compute_groups_bg, ait_id, pkgs)
 
     return {"scan_id": scan.id, "imported": total, "ait_id": ait_id}
+
+
+@app.post("/api/v1/import-scan", status_code=201)
+async def import_scan_create(
+    ait_id: str = Form(...),
+    name: str = Form(""),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """Import a Trivy JSON or CSV report, auto-creating the AIT if it does not exist."""
+    if not crud.get_application(db, ait_id):
+        crud.create_application(db, schemas.ApplicationCreate(
+            ait_id=ait_id, name=name.strip() or ait_id,
+        ))
+
+    content = await file.read()
+    raw = _parse_upload(content, file.filename or "upload")
+    if raw is None:
+        raise HTTPException(400, "File must be a Trivy JSON report or a vulnerability CSV")
+
+    scan = crud.create_scan(db, ait_id, file.filename or "upload.json", len(raw))
+    total = _import_to_db(db, ait_id, scan.id, raw)
+
+    if total > 0 and AI_ENABLED:
+        pkgs = sorted({f["package"] for f in raw if f.get("package")})
+        _executor.submit(_run_analysis_bg, ait_id)
+        if pkgs:
+            _executor.submit(_compute_groups_bg, ait_id, pkgs)
+
+    return {"scan_id": scan.id, "imported": total, "ait_id": ait_id, "created": True}
 
 
 # ─── Findings ────────────────────────────────────────────────────────────────
@@ -315,11 +548,8 @@ def generate_plans(ait_id: str, db: Session = Depends(get_db)):
 def _compute_groups_bg(ait_id: str, packages: list) -> None:
     """Call LLM to group packages into logical families; store results in DB.
 
-    Skips entirely when AI_ENABLED=0 or when all packages are already grouped.
+    Skips when all packages are already grouped.
     """
-    if not AI_ENABLED:
-        return
-
     # Skip if every package already has a group — avoids a redundant LLM call
     db = SessionLocal()
     try:
@@ -644,20 +874,27 @@ def reject_rollback(token: str, data: schemas.ApprovalAction, db: Session = Depe
 
 # ─── Analysis ────────────────────────────────────────────────────────────────
 
-def _run_analysis_bg(ait_id: str) -> None:
+def _run_analysis_bg(ait_id: str, force_ids: list[int] = None) -> None:
     """Run LLM analysis for findings that do not yet have analysis_md.
 
+    If force_ids is provided, re-analyze only those finding IDs (clearing any
+    existing analysis_md first). Otherwise skip findings that already have analysis.
     Pattern: read → close DB → LLM call → open DB → write → close.
-    Skips entirely when AI_ENABLED=0 or when all findings already have analysis.
+    Skips when all targeted findings already have analysis.
     """
-    if not AI_ENABLED:
-        return
-
-    # ── Step 1: read only unanalyzed findings (fast) ─────────────────────────
+    # ── Step 1: read findings, determine which to analyze (fast) ─────────────
     db = SessionLocal()
     try:
         findings_db = crud.list_findings(db, ait_id)
-        unanalyzed = [f for f in findings_db if not f.analysis_md]
+        if force_ids:
+            force_set = set(force_ids)
+            # Clear existing analysis for forced IDs so LLM re-runs them
+            for f in findings_db:
+                if f.id in force_set and f.analysis_md:
+                    crud.update_finding(db, f.id, analysis_md=None)
+            unanalyzed = [f for f in findings_db if f.id in force_set]
+        else:
+            unanalyzed = [f for f in findings_db if not f.analysis_md]
         if not unanalyzed:
             return  # nothing to do — avoids an LLM call entirely
         findings = [
@@ -692,11 +929,93 @@ def _run_analysis_bg(ait_id: str) -> None:
 
 @app.post("/api/v1/applications/{ait_id}/analyze")
 def run_analysis(ait_id: str, background_tasks: BackgroundTasks,
+                 data: schemas.AnalyzeRequest = None,
                  db: Session = Depends(get_db)):
     if not crud.get_application(db, ait_id):
         raise HTTPException(404, "Application not found")
-    background_tasks.add_task(_run_analysis_bg, ait_id)
-    return {"status": "started", "ait_id": ait_id}
+    force_ids = data.finding_ids if data else None
+    background_tasks.add_task(_run_analysis_bg, ait_id, force_ids)
+    return {"status": "started", "ait_id": ait_id, "force_ids": len(force_ids) if force_ids else None}
+
+
+# ─── Dependency Intelligence ──────────────────────────────────────────────────
+
+def _run_dep_check_bg(ait_id: str, live: bool = False) -> None:
+    """Run dependency intelligence check for all findings in an AIT (background)."""
+    try:
+        import dep_agent
+    except ImportError as exc:
+        print(f"[dep-check-bg] dep_agent not importable: {exc}")
+        return
+
+    db = SessionLocal()
+    try:
+        app_obj = crud.get_application(db, ait_id)
+        host = app_obj.host if app_obj else None
+        findings_db = crud.list_findings(db, ait_id)
+        findings = [
+            {"cve": f.cve_id, "package": f.package, "severity": f.severity,
+             "installed": f.installed_version or "", "fixed": f.fixed_version or ""}
+            for f in findings_db
+        ]
+    finally:
+        db.close()
+
+    if not findings:
+        return
+
+    result = dep_agent.run_dep_check(findings, host=host if live else None, live=live)
+
+    db = SessionLocal()
+    try:
+        crud.store_dep_report(db, ait_id, result)
+        for f in result["findings_classified"]:
+            dep_info = json.dumps({
+                "risk":     f.get("dep_risk", "UNKNOWN"),
+                "label":    f.get("dep_label", ""),
+                "products": f.get("dep_products", []),
+                "note":     f.get("dep_note", ""),
+            })
+            rows = (
+                db.query(models.Finding)
+                .filter(
+                    models.Finding.ait_id == ait_id,
+                    models.Finding.cve_id == f.get("cve", ""),
+                    models.Finding.package == f.get("package", ""),
+                )
+                .all()
+            )
+            for row in rows:
+                crud.update_finding(db, row.id, dep_note=dep_info)
+    except Exception as exc:
+        print(f"[dep-check-bg] store {ait_id}: {exc}")
+    finally:
+        db.close()
+
+
+@app.post("/api/v1/applications/{ait_id}/dep-check")
+def run_dep_check(
+    ait_id: str,
+    background_tasks: BackgroundTasks,
+    data: schemas.DepCheckRequest = None,
+    db: Session = Depends(get_db),
+):
+    """Trigger dependency intelligence check — discovers running products via SSH and
+    classifies each finding as SAFE / CHECK_VERSION / VENDOR_BUNDLED / AT_RISK."""
+    if not crud.get_application(db, ait_id):
+        raise HTTPException(404, "Application not found")
+    live = data.live if data else False
+    background_tasks.add_task(_run_dep_check_bg, ait_id, live)
+    return {"status": "started", "ait_id": ait_id, "live": live}
+
+
+@app.get("/api/v1/applications/{ait_id}/dep-report")
+def get_dep_report_endpoint(ait_id: str, db: Session = Depends(get_db)):
+    """Return the last dep-check result for the AIT (products found + per-finding risk)."""
+    if not crud.get_application(db, ait_id):
+        raise HTTPException(404, "Application not found")
+    report = crud.get_dep_report(db, ait_id)
+    return {"ait_id": ait_id, "report": report}
 
 
 @app.post("/api/v1/applications/{ait_id}/import-analysis")

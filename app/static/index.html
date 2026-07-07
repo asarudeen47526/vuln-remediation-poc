@@ -94,6 +94,14 @@ a{color:var(--accent)}
 .cve-id{font-weight:600;font-size:14px}
 .pkg-name{color:var(--text2)}
 .version-pill{font-size:11px;background:var(--surface2);border-radius:4px;padding:2px 8px;font-family:monospace;color:var(--mono)}
+.dep-badge{font-size:10px;font-weight:600;padding:2px 7px;border-radius:4px;white-space:nowrap;letter-spacing:.04em}
+.dep-green{background:rgba(34,197,94,.15);color:#16a34a}
+.dep-amber{background:rgba(245,158,11,.15);color:#b45309}
+.dep-red{background:rgba(239,68,68,.15);color:#dc2626}
+.dep-blue{background:rgba(99,102,241,.15);color:#6366f1}
+.dep-grey{background:var(--surface2);color:var(--text3)}
+.dep-panel{background:var(--surface2);border-radius:6px;padding:10px 12px;font-size:12px;line-height:1.55;margin-top:2px}
+.dep-products{margin-top:4px;font-size:11px;color:var(--text2)}
 .status-badge{font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;white-space:nowrap}
 .status-open{background:rgba(59,130,246,.15);color:var(--s-open)}
 .status-remediated{background:rgba(34,197,94,.15);color:var(--s-rem)}
@@ -101,14 +109,33 @@ a{color:var(--accent)}
 .status-skipped{background:rgba(107,114,128,.15);color:var(--s-skip)}
 .status-rolled-back{background:rgba(139,92,246,.15);color:var(--s-roll)}
 .card-title-row{padding:0 16px 10px;color:var(--text2);font-size:13px}
-/* ── Card columns ────────────────────────────────────────────────────── */
-.card-cols{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;border-top:1px solid var(--border)}
-.card-col{padding:12px 16px;border-right:1px solid var(--border)}
+/* ── Card columns (standalone finding cards) ─────────────────────────── */
+.card-cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(0,1fr));gap:0;border-top:1px solid var(--border)}
+.card-col{padding:12px 16px;border-right:1px solid var(--border);min-width:0;overflow:hidden}
 .card-col:last-child{border-right:none}
 .col-label{font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px}
-.detail-grid{display:grid;grid-template-columns:auto 1fr;gap:4px 10px}
+.detail-grid{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 10px}
 .dk{color:var(--text3);font-size:12px;white-space:nowrap}
-.dv{font-size:12px;word-break:break-all}
+.dv{font-size:12px;overflow-wrap:break-word;word-break:break-word;min-width:0}
+/* ── CVE detail panel (inside family/pkg-group — nested, narrower) ─────── */
+.cve-detail-top{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);border-bottom:1px solid var(--border)}
+.cve-detail-side{padding:12px 16px;min-width:0;overflow:hidden}
+.cve-detail-side:first-child{border-right:1px solid var(--border)}
+.cve-analysis-row{padding:12px 16px;border-bottom:1px solid var(--border);min-width:0;overflow:hidden}
+.cve-action-row{display:flex;gap:8px;padding:8px 16px;flex-wrap:wrap;align-items:center}
+/* ── Agent Workflow ─────────────────────────────────────────────────────────── */
+.cve-workflow-row{padding:12px 16px;border-bottom:1px solid var(--border);background:rgba(99,102,241,.03)}
+.wf-steps{display:flex;flex-direction:column;gap:5px;margin-top:8px}
+.wf-step{display:grid;grid-template-columns:22px 20px minmax(0,1fr);gap:6px;align-items:start;padding:6px 10px;border-radius:6px;background:var(--surface);border:1px solid var(--border)}
+.wf-step.wf-dim{opacity:.38}
+.wf-step.wf-pending .wf-num{background:rgba(234,179,8,.2);color:#eab308;border-color:rgba(234,179,8,.3)}
+.wf-step.wf-err .wf-num{background:var(--c-crit-bg);color:var(--c-crit)}
+.wf-num{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:rgba(99,102,241,.18);color:var(--accent);font-size:10px;font-weight:700;flex-shrink:0;margin-top:1px}
+.wf-icon{font-size:13px;margin-top:2px}
+.wf-body{display:flex;flex-direction:column;gap:1px;min-width:0}
+.wf-title{font-size:12px;font-weight:600;color:var(--text);white-space:nowrap}
+.wf-desc{font-size:11px;color:var(--text2);word-break:break-word;overflow-wrap:break-word;line-height:1.5}
+.wf-desc.wf-mono{font-family:monospace;color:var(--mono);background:rgba(56,189,248,.08);padding:1px 5px;border-radius:3px;display:inline-block;margin-top:2px}
 .mono{font-family:monospace;font-size:11px;color:var(--mono)}
 .text-muted{color:var(--text3)}
 .sev-text-critical{color:var(--c-crit)}
@@ -117,9 +144,9 @@ a{color:var(--accent)}
 .sev-text-low{color:var(--c-low)}
 .plan-loading{color:var(--text2);font-size:13px;display:flex;align-items:center;gap:8px;padding:8px 0}
 .plan-error{color:var(--c-high);font-size:12px}
-.restore-box{margin-top:10px;background:rgba(139,92,246,.08);border:1px solid rgba(139,92,246,.25);border-radius:6px;padding:8px 10px;font-size:12px;color:var(--text2)}
+.restore-box{margin-top:10px;background:rgba(139,92,246,.08);border:1px solid rgba(139,92,246,.25);border-radius:6px;padding:8px 10px;font-size:12px;color:var(--text2);overflow-wrap:break-word;word-break:break-word}
 .restore-lbl{font-weight:600;color:#8b5cf6;display:block;margin-bottom:3px}
-.analysis-md{font-size:12px;color:var(--text2);line-height:1.6;max-height:160px;overflow-y:auto}
+.analysis-md{font-size:12px;color:var(--text2);line-height:1.6;max-height:280px;overflow-y:auto;overflow-x:hidden;word-break:break-word;overflow-wrap:break-word}
 .no-data{font-size:12px;color:var(--text3);font-style:italic}
 /* ── Card actions ────────────────────────────────────────────────────── */
 .card-actions{display:flex;gap:8px;padding:10px 16px;border-top:1px solid var(--border);flex-wrap:wrap;align-items:center;background:rgba(0,0,0,.12)}
@@ -253,6 +280,9 @@ a{color:var(--accent)}
 .family-cnt-pill{font-size:11px;background:rgba(99,102,241,.12);color:var(--accent);border-radius:20px;padding:2px 9px;border:1px solid rgba(99,102,241,.25)}
 .family-body{border-top:1px solid var(--border)}
 .family-actions{display:flex;gap:8px;padding:10px 16px;border-top:1px solid var(--border);background:rgba(0,0,0,.12);flex-wrap:wrap;align-items:center}
+.pkg-upgrade-group{border:1px solid var(--border);border-radius:var(--r);margin:4px 12px;overflow:hidden}
+.pkg-upgrade-hdr{display:flex;align-items:center;gap:8px;padding:7px 12px;cursor:pointer;background:var(--surface2);transition:background .1s;user-select:none}
+.pkg-upgrade-hdr:hover{background:rgba(99,102,241,.08)}
 </style>
 </head>
 <body>
@@ -276,10 +306,11 @@ a{color:var(--accent)}
         <div class="header-sub" id="ait-sub"></div>
       </div>
       <div class="header-right">
-        <span class="ai-off-badge hidden" id="ai-status-badge" title="Set AI_ENABLED=1 in .env and restart to enable AI features">🤖 AI Off</span>
-        <button class="btn btn-primary" id="btn-import" disabled onclick="openModal('modal-import')">↑ Import Scan</button>
+        <span class="ai-off-badge hidden" id="ai-status-badge" title="Auto-analysis is off (AI_ENABLED=0). Use the Analyze buttons to run on-demand analysis.">🤖 Auto: Off</span>
+        <button class="btn btn-primary" id="btn-import" onclick="openModal('modal-import')">↑ Import Scan</button>
         <button class="btn btn-outline" id="btn-gen-plans" disabled onclick="generateAllPlans()" title="Generate remediation plans for all open vulnerability findings">⚙ Generate Plans</button>
         <button class="btn btn-outline" id="btn-analyze" disabled onclick="openModal('modal-analyze')">🔬 Analyze</button>
+        <button class="btn btn-outline" id="btn-dep-check" disabled onclick="runDepCheck()" title="Discover service dependencies and classify each finding">🔗 Dep Check</button>
         <button class="btn-icon" onclick="toggleTheme()" title="Toggle theme">◑</button>
         <button class="notif-btn" onclick="openPendingApprovals()">🔔<span class="notif-n" id="notif-n">0</span></button>
       </div>
@@ -302,7 +333,16 @@ a{color:var(--accent)}
         Vulnerabilities <span class="tab-count" id="cnt-vuln">0</span>
       </button>
       <button class="tab-btn" id="tab-npt" onclick="switchTab('npt')">
-        NPTs <span class="tab-count" id="cnt-npt">0</span>
+        NPT <span class="tab-count" id="cnt-npt">0</span>
+      </button>
+      <button class="tab-btn" id="tab-eol" onclick="switchTab('eol')">
+        EOL <span class="tab-count" id="cnt-eol">0</span>
+      </button>
+      <button class="tab-btn" id="tab-secret" onclick="switchTab('secret')">
+        Password Rotation <span class="tab-count" id="cnt-secret">0</span>
+      </button>
+      <button class="tab-btn" id="tab-other" onclick="switchTab('other')">
+        Others <span class="tab-count" id="cnt-other">0</span>
       </button>
     </div>
 
@@ -321,6 +361,7 @@ a{color:var(--accent)}
       <div class="view-toggle">
         <button class="view-btn active" id="view-btn-grouped" onclick="setViewMode(true)" title="Group by package">⊞ Grouped</button>
         <button class="view-btn" id="view-btn-flat" onclick="setViewMode(false)" title="Individual cards">☰ Flat</button>
+        <button class="view-btn" id="btn-expand-all" onclick="toggleAllFamilies()" title="Expand or collapse all groups">⊕ Expand All</button>
         <button class="view-btn" id="btn-compute-groups" onclick="computeGroups()" title="Ask the LLM to intelligently group related packages into families">🤖 AI Group</button>
       </div>
     </div>
@@ -357,22 +398,34 @@ a{color:var(--accent)}
 
   <!-- Import Scan -->
   <div class="modal hidden" id="modal-import">
-    <div class="modal-hdr"><h2>Import Vulnerability Scan</h2><button class="close-btn" onclick="closeModal()">✕</button></div>
+    <div class="modal-hdr"><h2>Import Trivy Scan Report</h2><button class="close-btn" onclick="closeModal()">✕</button></div>
     <div class="modal-body">
-      <p class="text-sm" style="margin-bottom:14px">Upload a Trivy JSON report for <strong id="import-ait-label"></strong></p>
-      <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()" ondragover="event.preventDefault();this.classList.add('drag')" ondragleave="this.classList.remove('drag')" ondrop="handleDrop(event)">
-        <div class="upload-icon">📁</div>
-        <div>Click or drag a Trivy JSON file here</div>
-        <div class="upload-hint">Output of: trivy fs / trivy image --format json</div>
+      <div class="form-row">
+        <label>Application (AIT)</label>
+        <select id="import-ait-select" onchange="onImportAITChange(this.value)" style="margin-top:4px">
+          <option value="">— Select an application —</option>
+          <option value="__new__">+ Create New Application</option>
+        </select>
       </div>
-      <input type="file" id="file-input" accept=".json" style="display:none" onchange="handleFile(event)">
-      <div id="file-chip-wrap" class="hidden">
-        <span class="file-chip">📄 <span id="file-chip-name"></span> <button onclick="clearFile()" style="background:none;color:var(--text3);margin-left:4px">✕</button></span>
+      <div id="import-new-ait-fields" class="hidden" style="margin-top:10px">
+        <div class="form-row"><label>AIT ID <span style="color:var(--c-crit)">*</span></label><input id="new-ait-id-input" placeholder="AIT-004" oninput="_updateImportBtn()"></div>
+        <div class="form-row" style="margin-top:8px"><label>Application Name <span style="color:var(--c-crit)">*</span></label><input id="new-ait-name-input" placeholder="my-app-prod" oninput="_updateImportBtn()"></div>
+      </div>
+      <div style="margin-top:14px">
+        <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()" ondragover="event.preventDefault();this.classList.add('drag')" ondragleave="this.classList.remove('drag')" ondrop="handleDrop(event)">
+          <div class="upload-icon">📁</div>
+          <div>Click or drag a Trivy JSON or CSV file here</div>
+          <div class="upload-hint">Trivy JSON · CSV (CVE, Package, Severity, InstalledVersion, FixedVersion, Target)</div>
+        </div>
+        <input type="file" id="file-input" accept=".json,.csv" style="display:none" onchange="handleFile(event)">
+        <div id="file-chip-wrap" class="hidden">
+          <span class="file-chip">📄 <span id="file-chip-name"></span> <button onclick="clearFile()" style="background:none;color:var(--text3);margin-left:4px">✕</button></span>
+        </div>
       </div>
     </div>
     <div class="modal-foot">
       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-primary" id="btn-import-submit" disabled onclick="importScan()">Import &amp; Analyze</button>
+      <button class="btn btn-primary" id="btn-import-submit" disabled onclick="importScan()">Import</button>
     </div>
   </div>
 
@@ -478,6 +531,8 @@ const S = {
   pollTimer: null, importFile: null,
   sevFilter: '', searchQuery: '', groupedView: true,
   _lastSidebarRefresh: 0,
+  _analysisTriggeredFor: null,
+  depCheckRunning: false,
   aiEnabled: true,   // updated from /api/v1/config on init
 };
 
@@ -526,11 +581,12 @@ async function init() {
 function renderAiStatus() {
   const btn = document.getElementById('btn-compute-groups');
   const badge = document.getElementById('ai-status-badge');
+  // btn-compute-groups is always functional — on-demand AI is always available
+  if (btn) { btn.disabled = false; btn.title = 'Ask the LLM to intelligently group related packages into families'; }
+  // Badge is informational: visible when auto-analysis is off
   if (S.aiEnabled) {
-    if (btn) { btn.disabled = false; btn.title = 'Ask the LLM to intelligently group related packages into families'; }
     if (badge) badge.classList.add('hidden');
   } else {
-    if (btn) { btn.disabled = true; btn.title = 'AI is disabled (AI_ENABLED=0 in .env)'; btn.textContent = '🤖 AI: Off'; }
     if (badge) badge.classList.remove('hidden');
   }
 }
@@ -567,10 +623,9 @@ async function selectAIT(aitId) {
   const app = S.apps.find(a=>a.ait_id===aitId);
   document.getElementById('ait-title').textContent = app ? `${app.ait_id} — ${app.name}` : aitId;
   document.getElementById('ait-sub').textContent = app ? `${app.environment}${app.host?' · '+app.host:''}${app.owner_name?' · '+app.owner_name:''}` : '';
-  document.getElementById('btn-import').disabled = false;
   document.getElementById('btn-gen-plans').disabled = false;
   document.getElementById('btn-analyze').disabled = false;
-  document.getElementById('import-ait-label').textContent = aitId;
+  document.getElementById('btn-dep-check').disabled = false;
   document.getElementById('analyze-ait-label').textContent = aitId;
   document.getElementById('filter-bar').style.display = '';
   await refreshFindings();
@@ -583,6 +638,12 @@ async function refreshFindings() {
     S.findings = await api('GET',`/applications/${S.selectedAIT}/findings`);
     S.stats = computeStatsFromFindings(S.findings);
     renderStats(); renderFindings();
+    // Auto-trigger analysis when AI is on and findings have no analysis yet
+    const hasUnanalyzed = S.findings.length > 0 && S.findings.some(f => !f.analysis_md);
+    if (hasUnanalyzed && S.aiEnabled && S._analysisTriggeredFor !== S.selectedAIT) {
+      S._analysisTriggeredFor = S.selectedAIT;
+      _autoTriggerAnalysis();
+    }
     // Refresh sidebar at most every 15s to avoid unnecessary API round-trips
     if (Date.now() - S._lastSidebarRefresh > 15000) {
       S.apps = await api('GET','/applications');
@@ -592,9 +653,16 @@ async function refreshFindings() {
   } catch(e) { toast('err','Failed to load: '+e.message); }
 }
 
+async function _autoTriggerAnalysis() {
+  try {
+    await api('POST', `/applications/${S.selectedAIT}/analyze`);
+    startAnalysisPoll();
+  } catch(e) { /* silent — per-CVE Analyze buttons are always available as fallback */ }
+}
+
 // ── Stats ──────────────────────────────────────────────────────────────────
 function computeStatsFromFindings(findings) {
-  const s = {total:0,critical:0,high:0,medium:0,low:0,open:0,remediated:0,deferred:0,skipped:0,rolled_back:0,vulnerabilities:0,npts:0,pending_approvals:0};
+  const s = {total:0,critical:0,high:0,medium:0,low:0,open:0,remediated:0,deferred:0,skipped:0,rolled_back:0,vulnerabilities:0,npts:0,eols:0,secrets:0,others:0,pending_approvals:0};
   for (const f of findings) {
     s.total++;
     if (f.severity==='CRITICAL') s.critical++;
@@ -608,6 +676,9 @@ function computeStatsFromFindings(findings) {
     else if (f.status==='rolled_back') s.rolled_back++;
     if (f.category==='vulnerability') s.vulnerabilities++;
     else if (f.category==='npt') s.npts++;
+    else if (f.category==='eol') s.eols++;
+    else if (f.category==='secret') s.secrets++;
+    else if (['other','misconfig','license'].includes(f.category)) s.others++;
     if (f.pending_rollback_token) s.pending_approvals++;
   }
   return s;
@@ -621,6 +692,9 @@ function renderStats() {
   }
   document.getElementById('cnt-vuln').textContent = S.stats.vulnerabilities ?? 0;
   document.getElementById('cnt-npt').textContent = S.stats.npts ?? 0;
+  document.getElementById('cnt-eol').textContent = S.stats.eols ?? 0;
+  document.getElementById('cnt-secret').textContent = S.stats.secrets ?? 0;
+  document.getElementById('cnt-other').textContent = S.stats.others ?? 0;
 }
 
 // ── Tabs ───────────────────────────────────────────────────────────────────
@@ -636,7 +710,11 @@ function renderFindings() {
   const wrap = document.getElementById('findings-wrap');
   if (!S.selectedAIT) { wrap.innerHTML=emptyHtml('🛡','Select an Application','Choose an AIT from the sidebar'); return; }
 
-  let list = S.findings.filter(f => f.category === S.activeTab);
+  let list = S.findings.filter(f =>
+    S.activeTab === 'other'
+      ? ['other','misconfig','license'].includes(f.category)
+      : f.category === S.activeTab
+  );
 
   // Severity filter
   if (S.sevFilter) list = list.filter(f => f.severity === S.sevFilter);
@@ -654,7 +732,7 @@ function renderFindings() {
 
   if (!list.length) {
     const reason = S.searchQuery || S.sevFilter ? 'Try a different search term or filter' : 'Import a scan to populate this list';
-    const lbl = S.activeTab==='npt'?'Non-Patchable Treatments':'Vulnerabilities';
+    const lbl = {vulnerability:'Vulnerabilities',npt:'NPT Findings',eol:'EOL Findings',secret:'Password Rotation Findings',other:'Other Findings'}[S.activeTab]||'Findings';
     wrap.innerHTML = emptyHtml('✅', 'No ' + lbl, reason);
     return;
   }
@@ -662,12 +740,58 @@ function renderFindings() {
   const total = list.length;
   const countHtml = `<div class="result-count">${total} finding${total!==1?'s':''} shown${S.searchQuery||S.sevFilter?' (filtered)':''}</div>`;
 
+  // Snapshot scroll positions of any visible analysis-md elements before DOM replacement
+  const analysisScrolls = {};
+  document.querySelectorAll('.analysis-md').forEach(el => {
+    if (el.scrollTop > 0) {
+      const detail = el.closest('[id^="detail-"]');
+      if (detail) analysisScrolls[detail.id] = el.scrollTop;
+    }
+  });
+  // Snapshot .main scroll so findings re-render doesn't jump the page
+  const mainEl = document.querySelector('.main');
+  const mainScroll = mainEl ? mainEl.scrollTop : 0;
+
   if (S.groupedView) {
+    // Snapshot which bodies are currently open so the poll doesn't collapse them
+    const openIds = new Set(
+      [...document.querySelectorAll('.family-body:not(.hidden), [id$="-body"]:not(.hidden)')]
+        .map(el => el.id)
+    );
+    const openCveIds = new Set(
+      [...document.querySelectorAll('.cve-detail.open')].map(el => el.id)
+    );
     const families = groupByFamily(list);
     wrap.innerHTML = countHtml + families.map(familyCardHtml).join('');
+    // Restore open state for family / pkg-group bodies
+    openIds.forEach(id => {
+      const body = document.getElementById(id);
+      if (!body) return;
+      body.classList.remove('hidden');
+      const icon = document.getElementById(id.replace('-body', '-icon'));
+      if (icon) icon.textContent = '−';
+    });
+    // Restore open CVE detail rows
+    openCveIds.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.classList.add('open');
+    });
+    // Sync Expand All button label
+    const btn = document.getElementById('btn-expand-all');
+    if (btn) {
+      const anyOpen = document.querySelector('.family-body:not(.hidden)');
+      btn.textContent = anyOpen ? '⊖ Collapse All' : '⊕ Expand All';
+    }
   } else {
     wrap.innerHTML = countHtml + list.map(cardHtml).join('');
   }
+
+  // Restore analysis-md scroll positions after DOM rebuild
+  Object.entries(analysisScrolls).forEach(([detailId, scrollTop]) => {
+    const el = document.querySelector(`#${detailId} .analysis-md`);
+    if (el) el.scrollTop = scrollTop;
+  });
+  if (mainEl) mainEl.scrollTop = mainScroll;
 }
 
 function emptyHtml(icon,title,sub) {
@@ -693,21 +817,39 @@ function cardHtml(f) {
       <div class="card-col">${analysisColHtml(f)}</div>
       <div class="card-col">${planColHtml(f)}</div>
     </div>
+    <div style="border-top:1px solid var(--border)">${workflowHtml(f)}</div>
     <div class="card-actions">${actionsHtml(f)}</div>
   </div>`;
 }
 
 function techColHtml(f) {
   const sc = {CRITICAL:'critical',HIGH:'high',MEDIUM:'medium',LOW:'low'}[f.severity]||'low';
-  return `<div class="col-label">Technical Details</div>
-  <div class="detail-grid">
-    <span class="dk">Package</span><span class="dv">${f.package}</span>
+  const catLabel = {
+    vulnerability:'Vulnerability',
+    npt:'NPT — Not Permitted',
+    eol:'EOL — End of Life',
+    secret:'Password Rotation',
+    other:'Other',
+    misconfig:'Misconfiguration',
+    license:'License Issue',
+  }[f.category] || f.category;
+  let rows = `<span class="dk">Category</span><span class="dv">${catLabel}</span>
     <span class="dk">Severity</span><span class="dv sev-text-${sc}">${f.severity}</span>
-    <span class="dk">OS / Target</span><span class="dv">${esc(f.os_target||'—')}</span>
+    <span class="dk">Target</span><span class="dv">${esc(f.os_target||'—')}</span>`;
+  if (['vulnerability','npt','eol'].includes(f.category)) {
+    rows += `<span class="dk">Package</span><span class="dv">${esc(f.package)}</span>
     <span class="dk">Installed</span><span class="dv mono">${esc(f.installed_version||'—')}</span>
-    <span class="dk">Fixed in</span><span class="dv mono ${f.fixed_version?'':'text-muted'}">${esc(f.fixed_version||'No fix available')}</span>
-    <span class="dk">Category</span><span class="dv">${f.category==='npt'?'Non-Patchable':'Vulnerability'}</span>
-  </div>`;
+    <span class="dk">Fixed in</span><span class="dv mono ${f.fixed_version?'':'text-muted'}">${esc(f.fixed_version||'No fix available')}</span>`;
+  } else if (f.category==='secret') {
+    rows += `<span class="dk">Rule</span><span class="dv mono">${esc(f.cve_id)}</span>
+    <span class="dk">Source</span><span class="dv">${esc(f.package)}</span>`;
+  } else {
+    // other / misconfig / license
+    rows += `<span class="dk">Type</span><span class="dv">${esc(f.package)}</span>
+    <span class="dk">ID</span><span class="dv mono">${esc(f.cve_id)}</span>`;
+    if (f.installed_version) rows += `<span class="dk">Path</span><span class="dv mono">${esc(f.installed_version)}</span>`;
+  }
+  return `<div class="col-label">Technical Details</div><div class="detail-grid">${rows}</div>`;
 }
 
 function md2html(md) {
@@ -730,21 +872,29 @@ function md2html(md) {
 
 function analysisColHtml(f) {
   if (!f.analysis_md) {
-    if (!S.aiEnabled) {
+    // Auto-trigger is running — show in-progress state
+    if (S._analysisTriggeredFor === S.selectedAIT) {
       return `<div class="col-label">Agent Analysis</div>
-      <div class="no-data" style="color:var(--text3)">AI disabled<br><span style="font-size:11px">Set AI_ENABLED=1 in .env to enable</span></div>`;
+      <div class="no-data" style="color:var(--text3);font-size:12px;line-height:1.6">
+        <span class="spinner" style="display:inline-block;vertical-align:middle;margin-right:4px"></span> Analyzing…<br>
+        <span style="font-size:11px">LLM analysis in progress — results appear automatically</span>
+      </div>`;
     }
     return `<div class="col-label">Agent Analysis</div>
-    <div class="no-data">No analysis yet.<br>
-    <button class="link-btn" onclick="runAnalysis()">Run Analysis</button></div>`;
+    <div class="no-data" style="color:var(--text3);font-size:12px;line-height:1.6">
+      Not yet analyzed<br>
+      <span style="font-size:11px">Click <strong>Analyze</strong> below to run on-demand</span>
+    </div>`;
   }
+  // Strip the leading ### CVE-XXXX header (redundant — already shown in the row)
+  const md = f.analysis_md.replace(/^###\s+[\w:\-]+\s*\n?/, '').trim();
   return `<div class="col-label">Agent Analysis</div>
-  <div class="analysis-md">${md2html(f.analysis_md || '')}</div>`;
+  <div class="analysis-md" style="font-size:13px">${md2html(md)}</div>`;
 }
 
 function planColHtml(f) {
   if (f.plan_status==='pending') return `<div class="col-label">Remediation Plan</div><div class="plan-loading"><span class="spinner"></span> Generating… <span style="font-size:11px;color:var(--text3)">(LLM call in progress)</span></div>`;
-  if (f.plan_status==='na') return `<div class="col-label">Remediation Plan</div><div class="no-data" style="color:var(--text3)">No patch available<br><span style="font-size:11px">NPT — no fixed version published</span></div>`;
+  if (f.plan_status==='na') { const adv=f.plan?.plan_error||'No fix available.'; return `<div class="col-label">Remediation Plan</div><div class="no-data"><span style="font-size:12px;color:var(--text2);line-height:1.5">${esc(adv)}</span></div>`; }
   if (f.plan_status==='error') return `<div class="col-label">Remediation Plan</div><div class="plan-error">⚠ ${esc(f.plan?.plan_error||'error')}<br><button class="link-btn" onclick="retryPlan(${f.id})">Retry</button></div>`;
   if (!f.plan) return `<div class="col-label">Remediation Plan</div><div class="no-data">No plan yet<br><button class="link-btn" onclick="retryPlan(${f.id})">Generate</button></div>`;
   const p = f.plan;
@@ -754,7 +904,7 @@ function planColHtml(f) {
     <span class="dk">Action</span><span class="dv">${esc(p.action||'—')}</span>
     <span class="dk">Reboot</span><span class="dv">${p.reboot_required?'⚠ Yes':'No'}</span>
     <span class="dk">Services</span><span class="dv mono">${esc(svc)}</span>
-    <span class="dk">Reason</span><span class="dv">${esc((p.reason||'').substring(0,120))}</span>
+    <span class="dk">Reason</span><span class="dv">${esc((p.reason||'').substring(0,240))}</span>
   </div>
   ${p.restore_plan?`<div class="restore-box"><span class="restore-lbl">Auto-rollback</span>${esc(p.restore_plan.substring(0,200))}</div>`:''}`;
 }
@@ -764,25 +914,30 @@ function actionsHtml(f) {
   const isRem = f.status==='remediated';
   const planOk = f.plan_status==='ready';
   const rbtip = !planOk?'title="Waiting for plan…"':'';
+  const isAutoRemediable = f.category === 'vulnerability';
 
-  const remBtn = `<button class="btn btn-success" ${!isOpen||!planOk?'disabled':''} ${rbtip} onclick="showRemediateModal(${f.id})">🤖 Agent-Remediate</button>`;
+  const remBtn = isAutoRemediable
+    ? `<button class="btn btn-success" ${!isOpen||!planOk?'disabled':''} ${rbtip} onclick="showRemediateModal(${f.id})">🤖 Agent-Remediate</button>`
+    : '';
   const defBtn = `<button class="btn btn-amber" ${!isOpen?'disabled':''} onclick="deferFinding(${f.id})">📋 Defer for Review</button>`;
   const skipBtn = `<button class="btn btn-ghost" ${!isOpen?'disabled':''} onclick="skipFinding(${f.id})">✗ Not Remediate</button>`;
 
-  let rollBtn;
-  if (f.status==='rolled_back') {
-    rollBtn = `<button class="btn btn-outline" onclick="reopenFinding(${f.id})">↺ Re-open</button>`;
-  } else if (isRem && f.approved_rollback_token) {
-    rollBtn = `<button class="btn btn-danger" onclick="executeRollback(${f.id},'${f.approved_rollback_token}')">⚠ Execute Rollback</button>`;
-  } else if (isRem && f.pending_rollback_token) {
-    rollBtn = `<button class="btn btn-warn" onclick="manageApproval(${f.id},'${f.pending_rollback_token}')">⏳ Pending Approval</button>`;
-  } else if (isRem) {
-    rollBtn = `<button class="btn btn-warn" onclick="showRollbackModal(${f.id})">↩ Request Rollback</button>`;
-  } else {
-    rollBtn = `<button class="btn btn-ghost" disabled title="Available after remediation">↩ Rollback</button>`;
+  let rollBtn = '';
+  if (isAutoRemediable) {
+    if (f.status==='rolled_back') {
+      rollBtn = `<span class="action-sep"></span><button class="btn btn-outline" onclick="reopenFinding(${f.id})">↺ Re-open</button>`;
+    } else if (isRem && f.approved_rollback_token) {
+      rollBtn = `<span class="action-sep"></span><button class="btn btn-danger" onclick="executeRollback(${f.id},'${f.approved_rollback_token}')">⚠ Execute Rollback</button>`;
+    } else if (isRem && f.pending_rollback_token) {
+      rollBtn = `<span class="action-sep"></span><button class="btn btn-warn" onclick="manageApproval(${f.id},'${f.pending_rollback_token}')">⏳ Pending Approval</button>`;
+    } else if (isRem) {
+      rollBtn = `<span class="action-sep"></span><button class="btn btn-warn" onclick="showRollbackModal(${f.id})">↩ Request Rollback</button>`;
+    } else {
+      rollBtn = `<span class="action-sep"></span><button class="btn btn-ghost" disabled title="Available after remediation">↩ Rollback</button>`;
+    }
   }
 
-  return `${remBtn}${defBtn}${skipBtn}<span class="action-sep"></span>${rollBtn}`;
+  return `${remBtn}${defBtn}${skipBtn}${rollBtn}`;
 }
 
 // ── Search / filter / view ─────────────────────────────────────────────────
@@ -888,11 +1043,11 @@ function familyCardHtml(fg) {
   const restIds = allFindings.map(f => f.id).filter(id => !baseIds.includes(id));
   const sortedIds = [...baseIds, ...restIds];
 
-  const cveHtml = allFindings.map(flatCveRowHtml).join('');
+  const cveHtml = pkgGroups.map(pkgGroupHtml).join('');
 
   return `<div class="family-card sev-border-${sc}" id="${famId}">
     <div class="family-hdr" onclick="toggleFamily('${famId}')">
-      <span class="expand-icon" id="${famId}-icon">−</span>
+      <span class="expand-icon" id="${famId}-icon">+</span>
       <span class="sev-badge sev-${sc}">${maxSev}</span>
       <span class="family-name">${esc(family)}</span>
       ${pkgCount>1&&aiGrouped?`<span class="family-cnt-pill" style="background:rgba(34,197,94,.1);color:#22c55e;border-color:#15803d">🤖 AI</span>`:''}
@@ -901,11 +1056,12 @@ function familyCardHtml(fg) {
       ${remCount>0?`<span class="group-cnt" style="color:var(--s-rem)">${remCount} remediated</span>`:''}
       ${hasPending?'<span class="spinner"></span>':''}
     </div>
-    <div class="family-body" id="${famId}-body">
+    <div class="family-body hidden" id="${famId}-body">
       <div class="group-cve-list">${cveHtml}</div>
       <div class="family-actions">
         <button class="btn btn-success" ${!allOpen||!anyReady?'disabled':''} onclick="remediateFamily(${JSON.stringify(sortedIds)},${JSON.stringify(family)},event)">🤖 Remediate Family (${totalCVEs} finding${totalCVEs>1?'s':''})</button>
         <button class="btn btn-amber" ${!allOpen?'disabled':''} onclick="deferGroup(${JSON.stringify(allFindings.map(f=>f.id))})">📋 Defer All</button>
+        <button class="btn btn-outline" onclick="reanalyzeGroup(${JSON.stringify(allFindings.map(f=>f.id))},event)">⟳ Re-analyze Family</button>
         <span class="action-sep"></span>
         <span class="group-foot-hint">${esc(family)} · ${pkgCount} pkg${pkgCount>1?'s':''} · ${totalCVEs} finding${totalCVEs>1?'s':''}</span>
       </div>
@@ -913,35 +1069,226 @@ function familyCardHtml(fg) {
   </div>`;
 }
 
+function pkgGroupHtml(pkgFindings) {
+  if (pkgFindings.length === 1) return flatCveRowHtml(pkgFindings[0]);
+  const sevOrd = {CRITICAL:0,HIGH:1,MEDIUM:2,LOW:3};
+  const worstSev = pkgFindings.reduce((b,f)=>(sevOrd[f.severity]??9)<(sevOrd[b]??9)?f.severity:b,'LOW');
+  const wsc = {CRITICAL:'critical',HIGH:'high',MEDIUM:'medium',LOW:'low'}[worstSev]||'low';
+  const rep = pkgFindings[0];
+  const groupId = 'pkg-grp-' + rep.id;
+  const cveRows = pkgFindings.map(flatCveRowHtml).join('');
+  const pkgIds = pkgFindings.map(f=>f.id);
+  return `<div class="pkg-upgrade-group">
+    <div class="pkg-upgrade-hdr" onclick="togglePkgGroup('${groupId}')">
+      <span class="expand-icon" id="${groupId}-icon">+</span>
+      <span class="sev-badge sev-${wsc}">${worstSev}</span>
+      <span style="font-family:monospace;font-size:12px;color:var(--mono)">${esc(rep.package)}</span>
+      <span class="family-cnt-pill">${pkgFindings.length} CVEs · 1 upgrade fixes all</span>
+      <span style="font-size:11px;color:var(--text3)">${esc(rep.installed_version||'')} → ${esc(rep.fixed_version||'')}</span>
+      <button class="btn btn-outline" style="font-size:11px;padding:2px 8px;margin-left:auto" onclick="reanalyzeGroup(${JSON.stringify(pkgIds)},event)" title="Re-run LLM analysis for this package group">⟳</button>
+    </div>
+    <div class="hidden" id="${groupId}-body">
+      ${cveRows}
+    </div>
+  </div>`;
+}
+
+function togglePkgGroup(groupId) {
+  const body = document.getElementById(groupId + '-body');
+  const icon = document.getElementById(groupId + '-icon');
+  if (!body) return;
+  const isOpen = !body.classList.contains('hidden');
+  body.classList.toggle('hidden', isOpen);
+  if (icon) icon.textContent = isOpen ? '+' : '−';
+}
+
+function _renderWorkflow(title, steps) {
+  const stepsHtml = steps.map((s, i) => `
+    <div class="wf-step${s.dim?' wf-dim':''}${s.pending?' wf-pending':''}${s.err?' wf-err':''}">
+      <span class="wf-num">${i+1}</span>
+      <span class="wf-icon">${s.icon}</span>
+      <div class="wf-body">
+        <span class="wf-title">${s.title}</span>
+        <span class="wf-desc${s.mono?' wf-mono':''}">${esc(s.desc)}</span>
+      </div>
+    </div>`).join('');
+  return `<div class="cve-workflow-row">
+    <div class="col-label" style="margin-bottom:0">${title}</div>
+    <div class="wf-steps">${stepsHtml}</div>
+  </div>`;
+}
+
+function _detectEcosystem(f) {
+  const pkg = f.package || '';
+  const os  = (f.os || '').toLowerCase();
+  if (pkg.includes(':'))                                    return 'maven';
+  if (os.includes('node-pkg') || os.includes('node_modules')) return 'npm';
+  if (os.includes('python-pkg') || os.includes('pip'))     return 'pip';
+  if (os.includes('gem') || os.includes('ruby-gems'))      return 'gem';
+  if (os.includes('jar'))                                   return 'maven';
+  return 'os';
+}
+
+function _workflowAppLib(f, eco) {
+  const pkg   = f.package || 'the library';
+  const fixed = f.fixed_version || 'latest secure version';
+  const artifact = pkg.includes(':') ? pkg.split(':')[1] : pkg;
+  if (eco === 'maven') {
+    return _renderWorkflow('Application Library — Build & Deploy Workflow', [
+      {icon:'🔍', title:'Locate the JAR', desc:`find /opt/app -name "${artifact}-*.jar" — confirm the vulnerable version is present before proceeding`, mono:true},
+      {icon:'📝', title:'Update Build Definition', desc:`Set ${pkg} to version ${fixed} in pom.xml or build.gradle and commit the change`},
+      {icon:'🔨', title:'Rebuild Application', desc:`mvn clean package -DskipTests  (or gradle build) — produces a new artifact with the patched dependency`, mono:true},
+      {icon:'🚀', title:'Redeploy & Restart', desc:'Replace the running artifact and restart the application service — no OS-level package manager is involved'},
+      {icon:'✅', title:'Verify with Trivy', desc:`trivy fs --scanners vuln /opt/app — confirm the finding no longer appears in the next scan`, mono:true},
+    ]);
+  }
+  if (eco === 'npm') {
+    const cmd = f.fixed_version ? `npm install ${artifact}@${fixed}` : `npm update ${artifact}`;
+    return _renderWorkflow('Node.js Package — Update & Redeploy Workflow', [
+      {icon:'📝', title:'Update Dependency', desc:`cd /opt/app && ${cmd}`, mono:true},
+      {icon:'🧪', title:'Run Tests', desc:'npm test — confirm no regressions before deploying to the target'},
+      {icon:'🚀', title:'Redeploy & Restart', desc:'Deploy the updated node_modules and restart the Node.js application service'},
+      {icon:'✅', title:'Verify', desc:'trivy fs --scanners vuln /opt/app — confirm the finding is cleared', mono:true},
+    ]);
+  }
+  if (eco === 'pip') {
+    const cmd = f.fixed_version ? `pip install '${pkg}==${fixed}'` : `pip install --upgrade ${pkg}`;
+    return _renderWorkflow('Python Package — Upgrade & Restart Workflow', [
+      {icon:'📝', title:'Upgrade in Virtualenv', desc:`source /opt/app/venv/bin/activate && ${cmd}`, mono:true},
+      {icon:'🧪', title:'Run Tests', desc:'python -m pytest — confirm no regressions before deploying to the target'},
+      {icon:'🔄', title:'Restart Service', desc:'Restart the Python application service to load the updated library into memory'},
+      {icon:'✅', title:'Verify', desc:'trivy fs --scanners vuln /opt/app — confirm the finding is cleared', mono:true},
+    ]);
+  }
+  if (eco === 'gem') {
+    return _renderWorkflow('Ruby Gem — Update & Redeploy Workflow', [
+      {icon:'📝', title:'Update Gemfile', desc:`Set gem '${pkg}', '~> ${fixed}' in Gemfile`, mono:true},
+      {icon:'🔨', title:'Bundle Update', desc:`bundle update ${pkg}`, mono:true},
+      {icon:'🚀', title:'Redeploy & Restart', desc:'Deploy the updated bundle and restart the Ruby application service'},
+      {icon:'✅', title:'Verify', desc:'trivy fs --scanners vuln /opt/app — confirm the finding is cleared', mono:true},
+    ]);
+  }
+  return _renderWorkflow('Application Library — Update & Redeploy', [
+    {icon:'📝', title:'Update Dependency', desc:`Update ${pkg} to ${fixed} in your build configuration`},
+    {icon:'🔨', title:'Rebuild', desc:'Rebuild the application using your build system (Maven, Gradle, npm, pip…)'},
+    {icon:'🚀', title:'Redeploy', desc:'Deploy the rebuilt artifact and restart the affected service'},
+    {icon:'✅', title:'Re-scan', desc:'trivy fs --scanners vuln /opt/app — confirm the finding is resolved', mono:true},
+  ]);
+}
+
+function workflowHtml(f) {
+  const p = f.plan;
+
+  if (f.category === 'vulnerability') {
+    const eco = _detectEcosystem(f);
+    if (eco !== 'os') return _workflowAppLib(f, eco);
+
+    const steps = [];
+    if (f.plan_status === 'ready' && p) {
+      steps.push({icon:'✅', title:'Plan Validated', desc:`Action: ${p.action||'—'} · Package: ${p.package||f.package}${p.reboot_required?' · ⚠ Reboot required':''}`});
+    } else if (f.plan_status === 'pending') {
+      steps.push({icon:'⏳', title:'Plan Generation', desc:'LLM is generating the Ansible remediation plan…', pending:true});
+    } else if (f.plan_status === 'error') {
+      steps.push({icon:'⚠', title:'Plan Error', desc:p?.plan_error||'Plan generation failed — click Retry.', err:true});
+    } else {
+      steps.push({icon:'⏳', title:'Plan Generation', desc:'Awaiting plan generation…', pending:true});
+    }
+    const ready = f.plan_status === 'ready';
+    const pkg = p?.package || f.package || 'package';
+    const svcs = p?.services_to_restart || 'none';
+    const rollback = p?.restore_plan ? p.restore_plan.substring(0,140) : `dnf history undo last — restores ${pkg} to ${f.installed_version||'prior version'}`;
+    steps.push({icon:'👤', title:'Human Approval', desc:'Safety gate — a human must click "Approve & Execute" before any changes are applied to the host', dim:!ready});
+    steps.push({icon:'🤖', title:'Ansible Execution', desc:`ansible-playbook patch.yml -i <target>, -e pkg=${pkg} -e health_url=<HEALTH_URL>`, mono:true, dim:!ready});
+    steps.push({icon:'🔁', title:'Service Restart', desc:`Services restarted after patch: ${svcs}`, dim:!ready});
+    steps.push({icon:'🏥', title:'Smoke Test', desc:'HTTP health check — endpoint must return 2xx; failure triggers automatic rollback', dim:!ready});
+    steps.push({icon:'↩', title:'Auto-Rollback', desc:rollback, dim:!ready});
+    return _renderWorkflow('Agent Remediation Workflow', steps);
+  }
+
+  if (f.category === 'npt') {
+    return _renderWorkflow('Manual Remediation Advisory', [
+      {icon:'🔍', title:'Assess Impact', desc:'Evaluate exploitability in your environment and the business risk level of this CVE'},
+      {icon:'🛡', title:'Apply Compensating Controls', desc:'WAF rules, network segmentation, or input validation as interim mitigation while awaiting a vendor fix'},
+      {icon:'📋', title:'Track & Monitor', desc:'Defer the finding and set an alert for when the vendor publishes a patch'},
+      {icon:'🔄', title:'Re-assess When Fix Available', desc:'Re-import the scan after the vendor releases a fix, then promote to the Vulnerabilities tab and remediate'},
+    ]);
+  }
+
+  if (f.category === 'eol') {
+    const pkg = f.package || 'this package';
+    return _renderWorkflow('EOL — End of Life Upgrade Workflow', [
+      {icon:'🔍', title:'Identify Replacement', desc:`Find a currently supported version or successor for ${pkg}`},
+      {icon:'🧪', title:'Test in Staging', desc:'Validate the new version in a non-production environment to catch compatibility issues early'},
+      {icon:'📅', title:'Schedule Maintenance Window', desc:'Coordinate the upgrade timing with stakeholders and affected service owners to minimise downtime'},
+      {icon:'🚀', title:'Upgrade & Validate', desc:`Execute the upgrade on the host, restart dependent services, and confirm ${pkg} is operational`},
+      {icon:'🔄', title:'Re-scan', desc:'Run a fresh Trivy scan and re-import to confirm the EOL finding is resolved'},
+    ]);
+  }
+
+  if (f.category === 'secret') {
+    const src = f.package || 'the source system';
+    return _renderWorkflow('Password / Secret Rotation Workflow', [
+      {icon:'🔒', title:'Revoke Immediately', desc:`Invalidate the exposed credential in ${src} straight away to stop further unauthorised access`},
+      {icon:'🔑', title:'Generate New Secret', desc:'Create a new credential scoped to least-privilege and distribute it via a secure channel'},
+      {icon:'🔄', title:'Update All Consumers', desc:'Deploy the new credential to every service, CI/CD pipeline, and configuration that references it'},
+      {icon:'📊', title:'Audit Access Logs', desc:'Review logs for the exposure period to identify any unauthorised usage of the compromised credential'},
+      {icon:'🏛', title:'Store in Secrets Manager', desc:'Move the new credential into a vault (HashiCorp Vault, AWS Secrets Manager, Azure Key Vault) to prevent future exposure'},
+    ]);
+  }
+
+  // other / misconfig / license
+  const advisory = p?.plan_error || 'Follow the check resolution guidance to fix this finding.';
+  return _renderWorkflow('Remediation Advisory', [
+    {icon:'📖', title:'Review Advisory', desc:advisory},
+    {icon:'🔧', title:'Apply Fix', desc:'Implement the recommended configuration change, policy update, or architectural correction'},
+    {icon:'✅', title:'Validate & Re-scan', desc:'Re-run the Trivy scan after the fix to confirm the finding no longer appears'},
+  ]);
+}
+
 function flatCveRowHtml(f) {
   const fsc = {CRITICAL:'critical',HIGH:'high',MEDIUM:'medium',LOW:'low'}[f.severity]||'low';
   const fstc = {open:'open',remediated:'remediated',deferred:'deferred',skipped:'skipped',rolled_back:'rolled-back'}[f.status]||'open';
   let planIcon, piClass;
   if (f.plan_status==='ready')        { planIcon='✓ Ready'; piClass='pi-ok'; }
-  else if (f.plan_status==='pending') { planIcon='⏳';      piClass='pi-pend'; }
-  else if (f.plan_status==='na')      { planIcon='— NPT';   piClass='pi-na'; }
-  else                                { planIcon='⚠ Err';   piClass='pi-err'; }
+  else if (f.plan_status==='pending') { planIcon='⏳ Plan'; piClass='pi-pend'; }
+  else if (f.plan_status==='na') {
+    const naLabel = {npt:'NPT',eol:'EOL',secret:'Rotate',other:'Advisory',misconfig:'Advisory',license:'Advisory'}[f.category]||'N/A';
+    planIcon=`— ${naLabel}`; piClass='pi-na';
+  }
+  else { planIcon='⚠ Err'; piClass='pi-err'; }
   const isOpen = ['open','deferred','skipped'].includes(f.status);
   const planOk = f.plan_status === 'ready';
+  const eco = _detectEcosystem(f);
+  // Only OS-package vulnerabilities can be auto-remediated via Ansible/dnf
+  const isOsVuln = f.category === 'vulnerability' && eco === 'os';
   return `<div>
     <div class="cve-row" onclick="toggleCveDetail(${f.id})">
       <span class="sev-badge sev-${fsc}">${f.severity}</span>
       <span class="cve-id">${f.cve_id}</span>
       <span style="font-family:monospace;font-size:11px;color:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.package)}</span>
       <span class="cve-title-col">${esc(f.title||'')}</span>
+      ${depBadgeHtml(f)}
       <span class="${piClass}">${planIcon}</span>
       <span class="status-badge status-${fstc}">${f.status.replace('_',' ')}</span>
     </div>
     <div class="cve-detail" id="detail-${f.id}">
-      <div class="card-cols" style="border:none">
-        <div class="card-col">${techColHtml(f)}</div>
-        <div class="card-col">${analysisColHtml(f)}</div>
-        <div class="card-col">${planColHtml(f)}</div>
+      <div class="cve-detail-top">
+        <div class="cve-detail-side">${techColHtml(f)}</div>
+        <div class="cve-detail-side">${planColHtml(f)}</div>
       </div>
-      <div style="display:flex;gap:8px;padding:8px 0 0;flex-wrap:wrap">
-        <button class="btn btn-success" style="font-size:12px;padding:4px 10px" ${!isOpen||!planOk?'disabled':''} onclick="showRemediateModal(${f.id});event.stopPropagation()">🤖 Remediate</button>
+      <div class="cve-analysis-row">${analysisColHtml(f)}</div>
+      <div class="cve-analysis-row">${depColHtml(f)}</div>
+      ${workflowHtml(f)}
+      <div class="cve-action-row">
+        ${isOsVuln?`<button class="btn btn-success" style="font-size:12px;padding:4px 10px" ${!isOpen||!planOk?'disabled':''} onclick="showRemediateModal(${f.id});event.stopPropagation()">🤖 Remediate</button>`:''}
         <button class="btn btn-amber" style="font-size:12px;padding:4px 10px" ${!isOpen?'disabled':''} onclick="deferFinding(${f.id});event.stopPropagation()">📋 Defer</button>
         <button class="btn btn-ghost" style="font-size:12px;padding:4px 10px" ${!isOpen?'disabled':''} onclick="skipFinding(${f.id});event.stopPropagation()">✗ Skip</button>
+        ${(()=>{
+          const analysisRunning = !f.analysis_md && S._analysisTriggeredFor===S.selectedAIT;
+          const label = analysisRunning ? '⏳ Analyzing…' : (f.analysis_md ? '⟳ Re-analyze' : '🔬 Analyze');
+          const disabled = analysisRunning ? 'disabled' : '';
+          return `<button class="btn btn-outline" style="font-size:12px;padding:4px 10px;margin-left:auto" ${disabled} onclick="reanalyzeGroup([${f.id}],event)">${label}</button>`;
+        })()}
       </div>
     </div>
   </div>`;
@@ -954,6 +1301,16 @@ function toggleFamily(famId) {
   const isOpen = !body.classList.contains('hidden');
   body.classList.toggle('hidden', isOpen);
   if (icon) icon.textContent = isOpen ? '+' : '−';
+}
+
+function toggleAllFamilies() {
+  const btn = document.getElementById('btn-expand-all');
+  const bodies = document.querySelectorAll('.family-body');
+  const icons  = document.querySelectorAll('.family-hdr .expand-icon');
+  const anyCollapsed = [...bodies].some(b => b.classList.contains('hidden'));
+  bodies.forEach(b => b.classList.toggle('hidden', !anyCollapsed));
+  icons.forEach(ic => { ic.textContent = anyCollapsed ? '−' : '+'; });
+  btn.textContent = anyCollapsed ? '⊖ Collapse All' : '⊕ Expand All';
 }
 
 
@@ -1176,14 +1533,103 @@ async function runAnalysis() {
   } catch(e) { toast('err', 'Analysis error: ' + e.message); }
 }
 
+async function reanalyzeGroup(ids, event) {
+  if (event) event.stopPropagation();
+  if (!S.selectedAIT || !ids || !ids.length) return;
+  toast('info', `Re-analyzing ${ids.length} finding(s)…`);
+  try {
+    await api('POST', `/applications/${S.selectedAIT}/analyze`, {finding_ids: ids});
+    startAnalysisPoll();
+  } catch(e) { toast('err', 'Re-analyze error: ' + e.message); }
+}
+
 let _analysisPollTimer = null;
 function startAnalysisPoll() {
   if (_analysisPollTimer) clearInterval(_analysisPollTimer);
   _analysisPollTimer = setInterval(async () => {
     await refreshFindings();
     const missing = S.findings.some(f => !f.analysis_md);
-    if (!missing) { clearInterval(_analysisPollTimer); _analysisPollTimer = null; }
+    if (!missing) {
+      clearInterval(_analysisPollTimer);
+      _analysisPollTimer = null;
+      S._analysisTriggeredFor = null; // reset so re-import with new findings triggers again
+    }
   }, 5000);
+}
+
+// ── Dependency Intelligence ──────────────────────────────────────────────────
+
+const _DEP_COLORS = {
+  AT_RISK: 'red', CHECK_VERSION: 'amber', VENDOR_BUNDLED: 'blue', SAFE: 'green', UNKNOWN: 'grey'
+};
+const _DEP_ICONS = {
+  AT_RISK: '🔴', CHECK_VERSION: '🟡', VENDOR_BUNDLED: '📦', SAFE: '🟢', UNKNOWN: '⬜'
+};
+
+function depBadgeHtml(f) {
+  const di = f.dep_info;
+  if (!di) return '';
+  const color = _DEP_COLORS[di.risk] || 'grey';
+  const icon  = _DEP_ICONS[di.risk]  || '⬜';
+  return `<span class="dep-badge dep-${color}" title="${esc(di.note)}">${icon} ${esc(di.label)}</span>`;
+}
+
+function depColHtml(f) {
+  const di = f.dep_info;
+  if (!di) {
+    return `<div class="col-label">Dependency Risk</div>
+    <div class="no-data" style="font-size:12px;line-height:1.6;color:var(--text3)">
+      Not checked yet<br>
+      <span style="font-size:11px">Click <strong>🔗 Dep Check</strong> in the header to discover service dependencies on this host</span>
+    </div>`;
+  }
+  const color = _DEP_COLORS[di.risk] || 'grey';
+  const icon  = _DEP_ICONS[di.risk]  || '⬜';
+  const prods = di.products && di.products.length
+    ? `<div class="dep-products">Affects: <strong>${di.products.map(esc).join(', ')}</strong></div>`
+    : '';
+  return `<div class="col-label">Dependency Risk</div>
+  <div class="dep-panel">
+    <div style="margin-bottom:6px"><span class="dep-badge dep-${color}">${icon} ${esc(di.label)}</span></div>
+    <div style="font-size:12px;color:var(--text1)">${esc(di.note)}</div>
+    ${prods}
+  </div>`;
+}
+
+async function runDepCheck() {
+  if (!S.selectedAIT) return;
+  const btn = document.getElementById('btn-dep-check');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner" style="display:inline-block;vertical-align:middle"></span> Checking…';
+  S.depCheckRunning = true;
+  // Use live SSH discovery when the app has a host configured; fall back to local catalogue
+  const app = S.apps.find(a => a.ait_id === S.selectedAIT);
+  const live = !!(app && app.host);
+  const modeLabel = live ? `SSH discovery on ${app.host}` : 'catalogue + RPM graph (no SSH host configured)';
+  toast('info', `Dep Check started (${modeLabel}) — Layer 1: catalogue, Layer 2: RPM graph, Layer 3: LLM…`);
+  try {
+    await api('POST', `/applications/${S.selectedAIT}/dep-check`, {live});
+    // Poll findings until dep_info appears on at least one finding
+    let ticks = 0;
+    const poll = setInterval(async () => {
+      await refreshFindings();
+      ticks++;
+      const done = S.findings.some(f => f.dep_info);
+      if (done || ticks > 30) {   // timeout after ~2 min
+        clearInterval(poll);
+        S.depCheckRunning = false;
+        btn.disabled = false;
+        btn.innerHTML = '🔗 Dep Check';
+        if (done) toast('ok', 'Dependency check complete — risk badges updated in all finding rows');
+        else toast('info', 'Dep Check may still be running — refresh in a moment');
+      }
+    }, 4000);
+  } catch(e) {
+    toast('err', 'Dep Check error: ' + e.message);
+    btn.disabled = false;
+    btn.innerHTML = '🔗 Dep Check';
+    S.depCheckRunning = false;
+  }
 }
 
 let S_analysisFile = null;
@@ -1235,7 +1681,7 @@ function handleFile(ev) {
   S.importFile = file;
   document.getElementById('file-chip-name').textContent = file.name;
   document.getElementById('file-chip-wrap').classList.remove('hidden');
-  document.getElementById('btn-import-submit').disabled = false;
+  _updateImportBtn();
 }
 
 function handleDrop(ev) {
@@ -1246,28 +1692,54 @@ function handleDrop(ev) {
   S.importFile = file;
   document.getElementById('file-chip-name').textContent = file.name;
   document.getElementById('file-chip-wrap').classList.remove('hidden');
-  document.getElementById('btn-import-submit').disabled = false;
+  _updateImportBtn();
 }
 
 function clearFile() {
   S.importFile = null;
   document.getElementById('file-input').value = '';
   document.getElementById('file-chip-wrap').classList.add('hidden');
-  document.getElementById('btn-import-submit').disabled = true;
+  _updateImportBtn();
 }
 
 async function importScan() {
-  if (!S.importFile||!S.selectedAIT) return;
+  if (!S.importFile) return;
+  const aitVal = document.getElementById('import-ait-select').value;
+  if (!aitVal) { toast('err', 'Select or create an application first'); return; }
+
   document.getElementById('btn-import-submit').disabled = true;
   document.getElementById('btn-import-submit').innerHTML = '<span class="spinner"></span> Importing…';
   try {
-    const r = await apiUpload(`/applications/${S.selectedAIT}/import`, S.importFile);
+    let r;
+    if (aitVal === '__new__') {
+      const newId = document.getElementById('new-ait-id-input').value.trim();
+      const newName = document.getElementById('new-ait-name-input').value.trim();
+      if (!newId || !newName) { toast('err', 'AIT ID and Name are required'); return; }
+      const fd = new FormData();
+      fd.append('ait_id', newId);
+      fd.append('name', newName);
+      fd.append('file', S.importFile);
+      const res = await fetch('/api/v1/import-scan', {method:'POST', body:fd});
+      if (!res.ok) {
+        let msg = res.statusText;
+        try { const j = await res.json(); msg = j.detail || JSON.stringify(j); } catch {}
+        throw new Error(msg);
+      }
+      r = await res.json();
+      // Refresh app list so the new AIT appears in sidebar
+      S.apps = await api('GET', '/applications');
+      renderSidebar();
+      await selectAIT(r.ait_id);
+    } else {
+      r = await apiUpload(`/applications/${aitVal}/import`, S.importFile);
+      if (aitVal !== S.selectedAIT) await selectAIT(aitVal);
+    }
     closeModal(); clearFile();
-    toast('ok',`Imported ${r.imported} findings. Analysis & plans generating in background…`);
+    toast('ok', `Imported ${r.imported} finding(s) for ${r.ait_id}. Analysis & plans generating…`);
     await refreshFindings();
     startPoll();
     startAnalysisPoll();
-  } catch(e) { toast('err','Import failed: '+e.message); }
+  } catch(e) { toast('err', 'Import failed: ' + e.message); }
   finally {
     document.getElementById('btn-import-submit').disabled = false;
     document.getElementById('btn-import-submit').innerHTML = 'Import &amp; Analyze';
@@ -1313,6 +1785,42 @@ function openModal(id) {
   document.querySelectorAll('.modal').forEach(m=>m.classList.add('hidden'));
   document.getElementById(id).classList.remove('hidden');
   document.getElementById('overlay').classList.remove('hidden');
+  if (id === 'modal-import') _populateImportAITSelect();
+}
+
+function _populateImportAITSelect() {
+  const sel = document.getElementById('import-ait-select');
+  sel.innerHTML = '<option value="">— Select an application —</option>';
+  for (const a of S.apps) {
+    const opt = document.createElement('option');
+    opt.value = a.ait_id;
+    opt.textContent = `${a.ait_id} — ${a.name}`;
+    sel.appendChild(opt);
+  }
+  const newOpt = document.createElement('option');
+  newOpt.value = '__new__';
+  newOpt.textContent = '+ Create New Application';
+  sel.appendChild(newOpt);
+  if (S.selectedAIT) sel.value = S.selectedAIT;
+  onImportAITChange(sel.value);
+}
+
+function onImportAITChange(val) {
+  document.getElementById('import-new-ait-fields').classList.toggle('hidden', val !== '__new__');
+  _updateImportBtn();
+}
+
+function _updateImportBtn() {
+  const aitVal = document.getElementById('import-ait-select')?.value;
+  const hasFile = !!S.importFile;
+  let hasAIT = false;
+  if (aitVal && aitVal !== '__new__') {
+    hasAIT = true;
+  } else if (aitVal === '__new__') {
+    hasAIT = !!(document.getElementById('new-ait-id-input')?.value.trim() &&
+                document.getElementById('new-ait-name-input')?.value.trim());
+  }
+  document.getElementById('btn-import-submit').disabled = !(hasFile && hasAIT);
 }
 function closeModal() {
   document.getElementById('overlay').classList.add('hidden');

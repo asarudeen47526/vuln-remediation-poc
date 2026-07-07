@@ -63,6 +63,35 @@ def create_scan(db: Session, ait_id: str, filename: str, count: int) -> models.S
 # ── Findings ─────────────────────────────────────────────────────────────────
 
 def create_finding(db: Session, scan_id: int, ait_id: str, f: dict, category: str) -> models.Finding:
+    """Upsert a finding by (ait_id, cve_id, package).
+
+    If a matching finding already exists, update its mutable fields but
+    PRESERVE analysis_md and status so a re-import never loses stored analysis
+    or user-set remediation state.
+    """
+    existing = (
+        db.query(models.Finding)
+        .filter(
+            models.Finding.ait_id == ait_id,
+            models.Finding.cve_id == f["cve"],
+            models.Finding.package == f["package"],
+        )
+        .first()
+    )
+    if existing:
+        # Refresh scan pointer and mutable fields; keep analysis_md / status intact
+        existing.scan_id = scan_id
+        existing.severity = f.get("severity", "UNKNOWN")
+        existing.installed_version = f.get("installed")
+        existing.fixed_version = f.get("fixed")
+        existing.title = f.get("title")
+        existing.os_target = f.get("os")
+        existing.category = category
+        existing.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(existing)
+        return existing
+
     obj = models.Finding(
         scan_id=scan_id,
         ait_id=ait_id,
@@ -248,3 +277,16 @@ def get_family_group_map(db: Session, ait_id: str) -> dict:
         .all()
     )
     return {r.package: r.family_group for r in rows}
+
+
+def store_dep_report(db: Session, ait_id: str, report: dict) -> None:
+    """Persist the full dep-check result on the Application record."""
+    db.query(models.Application).filter(models.Application.ait_id == ait_id).update(
+        {"dep_report": report}
+    )
+    db.commit()
+
+
+def get_dep_report(db: Session, ait_id: str) -> Optional[dict]:
+    app = db.query(models.Application).filter(models.Application.ait_id == ait_id).first()
+    return app.dep_report if app else None

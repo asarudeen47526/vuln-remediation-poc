@@ -23,10 +23,11 @@ if os.path.exists(_env_file):
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "anthropic").lower()
 # Optional explicit model id; if empty a sane per-provider default is used.
 LLM_MODEL = os.getenv("LLM_MODEL", "")
-# Master AI kill-switch.  Set AI_ENABLED=0 in .env to stop ALL LLM calls
-# (analysis, plan generation, grouping) without restarting the server.
-# The dashboard remains fully functional for viewing/deferring/rolling back.
-AI_ENABLED = os.getenv("AI_ENABLED", "1") == "1"
+# Auto-analysis toggle.  AI_ENABLED=0 (default) disables automatic LLM calls
+# after import — analysis, plan generation, and grouping only run when triggered
+# on-demand from the UI.  Set AI_ENABLED=1 in .env and restart to have the app
+# automatically analyze findings on every import.
+AI_ENABLED = os.getenv("AI_ENABLED", "0") == "1"
 
 # --- Target VM (the machine being remediated) -------------------------------
 TARGET_HOST = os.getenv("TARGET_HOST", "10.0.0.20")

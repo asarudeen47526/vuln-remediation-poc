@@ -24,3 +24,11 @@ class ApprovalAction(BaseModel):
 
 class BulkRemediateRequest(BaseModel):
     finding_ids: list[int]
+
+
+class AnalyzeRequest(BaseModel):
+    finding_ids: Optional[list[int]] = None
+
+
+class DepCheckRequest(BaseModel):
+    live: bool = False
