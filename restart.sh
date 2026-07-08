@@ -83,9 +83,9 @@ fi
 # ─────────────────────────────────────────────────────────────────────────────
 info "Looking for orphaned app processes…"
 for pattern in "uvicorn app.main" "watch_agent.py" "r_act.py" "p_act.py"; do
-    pgrep -f "$pattern" | while read -r pid; do
+    while IFS= read -r pid; do
         kill "$pid" 2>/dev/null && warn "Killed orphan: $pattern (PID $pid)" || true
-    done
+    done < <(pgrep -f "$pattern" 2>/dev/null || true)
 done
 
 # Wait briefly for ports to release
