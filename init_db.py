@@ -178,6 +178,15 @@ def main():
     reset = "--reset" in sys.argv
     if reset:
         print("  WARNING: dropping all tables (--reset)...")
+        # Terminate any open connections first to avoid deadlock during DROP TABLE.
+        # This is safe — all app processes should be stopped before --reset is used.
+        import sqlalchemy
+        with engine.connect() as _conn:
+            _conn.execute(sqlalchemy.text(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                "WHERE datname = current_database() AND pid <> pg_backend_pid()"
+            ))
+            _conn.commit()
         Base.metadata.drop_all(bind=engine)
         print("  Dropped.")
 
