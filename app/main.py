@@ -151,6 +151,9 @@ def _gen_plan_bg(finding_id: int):
             plan = {
                 "action": "update_package",
                 "package": pkg,
+                "install_method": "dnf",
+                "remediation_strategy": f"Update {pkg} to {fixed} via dnf to resolve {cve_id}.",
+                "impact_assessment": "Low — dnf update with automatic rollback on failure.",
                 "reboot_required": False,
                 "services_to_restart": [],
                 "reason": f"[DRY-RUN] Update {pkg} from {installed} to {fixed} to fix {cve_id}.",
