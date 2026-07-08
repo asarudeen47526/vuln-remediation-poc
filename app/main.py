@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from config import AI_ENABLED, ALLOWED_ACTIONS, DRY_RUN, HEALTH_URL, PLAYBOOK, PLAYBOOK_MAP, SSH_KEY, SSH_USER, TARGET_HOST
+from llm_client import LLMConfigError
 
 from . import crud, models, schemas
 from .database import Base, SessionLocal, engine, get_db
@@ -161,6 +162,8 @@ def _gen_plan_bg(finding_id: int):
             ok, why = validate_plan(plan, finding_dict)
             if not ok:
                 plan, error = None, f"Validation failed: {why}"
+    except LLMConfigError as exc:
+        plan, error = None, f"LLM not configured — {exc}"
     except Exception as exc:  # noqa: BLE001
         plan, error = None, str(exc)
 
@@ -629,6 +632,10 @@ def _compute_groups_bg(ait_id: str, packages: list) -> None:
         for pkg in packages:
             if pkg not in assigned:
                 groups.append({"family": pkg, "reason": "not grouped by LLM", "packages": [pkg]})
+    except LLMConfigError as exc:
+        print(f"[groups-bg] LLM config error for {ait_id}: {exc}")
+        groups = [{"family": p, "reason": f"LLM not configured: {exc}", "packages": [p]}
+                  for p in packages]
     except Exception as exc:
         groups = [{"family": p, "reason": f"LLM unavailable: {exc}", "packages": [p]}
                   for p in packages]
@@ -945,6 +952,22 @@ def _run_analysis_bg(ait_id: str, force_ids: list[int] = None) -> None:
         from analyze import llm_analysis, _extract_per_cve
         analysis = llm_analysis(findings)
         per_cve = _extract_per_cve(analysis)
+    except LLMConfigError as exc:
+        # Store the config error in every finding's analysis_md so the user
+        # sees a clear, actionable message in the Analysis column.
+        err_md = (
+            f"### ⚠ LLM Not Configured\n\n"
+            f"{exc}\n\n"
+            f"**How to fix:** Update `LLM_PROVIDER` and the matching API key in `.env`, "
+            f"then run `./restart.sh` and click **🔬 Analyze** again."
+        )
+        db = SessionLocal()
+        try:
+            for finding_id in id_map.values():
+                crud.update_finding(db, finding_id, analysis_md=err_md)
+        finally:
+            db.close()
+        return
     except Exception as exc:  # noqa: BLE001
         print(f"[analyze-bg] {ait_id}: {exc}")
         return

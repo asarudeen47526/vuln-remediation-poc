@@ -874,7 +874,6 @@ function cardHtml(f) {
       <div class="card-col">${analysisColHtml(f)}</div>
       <div class="card-col">${planColHtml(f)}</div>
     </div>
-    <div style="border-top:1px solid var(--border)">${workflowHtml(f)}</div>
     <div class="card-actions">${actionsHtml(f)}</div>
   </div>`;
 }
@@ -940,13 +939,24 @@ function analysisColHtml(f) {
     return `<div class="col-label">Agent Analysis</div>
     <div class="no-data" style="color:var(--text3);font-size:12px;line-height:1.6">
       Not yet analyzed<br>
-      <span style="font-size:11px">Click <strong>Analyze</strong> below to run on-demand</span>
+      <span style="font-size:11px">Click <strong>🔬 Analyze</strong> below to run on-demand</span>
     </div>`;
   }
   // Strip the leading ### CVE-XXXX header (redundant — already shown in the row)
-  const md = f.analysis_md.replace(/^###\s+[\w:\-]+\s*\n?/, '').trim();
+  const raw = f.analysis_md.replace(/^###\s+[\w:\-]+\s*\n?/, '').trim();
+  // Detect LLM configuration errors and surface them with a distinct error style
+  const isConfigErr = raw.startsWith('### ⚠') || raw.startsWith('⚠') ||
+                      raw.toLowerCase().includes('llm not configured') ||
+                      raw.toLowerCase().includes('api key is not set') ||
+                      raw.toLowerCase().includes('not authenticated');
+  if (isConfigErr) {
+    return `<div class="col-label">Agent Analysis</div>
+    <div class="plan-error" style="font-size:12px;padding:8px 0;line-height:1.6;overflow-wrap:break-word">
+      ${md2html(raw)}
+    </div>`;
+  }
   return `<div class="col-label">Agent Analysis</div>
-  <div class="analysis-md" style="font-size:13px">${md2html(md)}</div>`;
+  <div class="analysis-md" style="font-size:13px">${md2html(raw)}</div>`;
 }
 
 function planColHtml(f) {
@@ -1339,7 +1349,6 @@ function flatCveRowHtml(f) {
       </div>
       <div class="cve-analysis-row">${analysisColHtml(f)}</div>
       <div class="cve-analysis-row">${depColHtml(f)}</div>
-      ${workflowHtml(f)}
       <div class="cve-action-row">
         ${isOsVuln?`<button class="btn btn-success" style="font-size:12px;padding:4px 10px" ${!isOpen||!planOk?'disabled':''} onclick="showRemediateModal(${f.id});event.stopPropagation()">🤖 Remediate</button>`:''}
         <button class="btn btn-amber" style="font-size:12px;padding:4px 10px" ${!isOpen?'disabled':''} onclick="deferFinding(${f.id});event.stopPropagation()">📋 Defer</button>
@@ -1349,6 +1358,12 @@ function flatCveRowHtml(f) {
           const label = analysisRunning ? '⏳ Analyzing…' : (f.analysis_md ? '⟳ Re-analyze' : '🔬 Analyze');
           const disabled = analysisRunning ? 'disabled' : '';
           return `<button class="btn btn-outline" style="font-size:12px;padding:4px 10px;margin-left:auto" ${disabled} onclick="reanalyzeGroup([${f.id}],event)">${label}</button>`;
+        })()}
+        ${(()=>{
+          const depRunning = S.depCheckRunning;
+          const depDone = !!f.dep_info;
+          const depLabel = depRunning ? '⏳ Checking…' : (depDone ? '⟳ Re-check Dep' : '🔗 Dep Check');
+          return `<button class="btn btn-outline" style="font-size:12px;padding:4px 10px" ${depRunning?'disabled':''} onclick="runDepCheck();event.stopPropagation()" title="Discover which services depend on this package">${depLabel}</button>`;
         })()}
         ${(f.status==='deferred'||f.status==='skipped')?`<button class="btn btn-outline" style="font-size:12px;padding:4px 10px" onclick="reopenFinding(${f.id});event.stopPropagation()">↺ Re-open</button>`:''}
       </div>
