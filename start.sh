@@ -185,7 +185,7 @@ ok "Database ready."
 info "Starting web dashboard on port $PORT…"
 start_proc uvicorn \
     "$VENV_PYTHON" -m uvicorn app.main:app \
-    --host 0.0.0.0 --port "$PORT" --reload
+    --host 0.0.0.0 --port "$PORT" --workers 2
 
 # Give uvicorn a moment to bind before the watch agent tries to talk to it
 sleep 2

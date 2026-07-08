@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Optional, List
+from sqlalchemy import text
 from sqlalchemy.orm import Session, joinedload, selectinload
 from . import models, schemas
 
@@ -28,24 +29,41 @@ def delete_application(db: Session, ait_id: str):
 
 
 def get_app_stats(db: Session, ait_id: str) -> dict:
-    findings = db.query(models.Finding).filter(models.Finding.ait_id == ait_id).all()
-    pending = db.query(models.Approval).filter(
-        models.Approval.ait_id == ait_id,
-        models.Approval.status == "pending",
-    ).count()
+    # Single SQL aggregation — never loads Finding rows into Python memory.
+    row = db.execute(text("""
+        SELECT
+            COUNT(*)                                                  AS total,
+            SUM(CASE WHEN severity='CRITICAL'    THEN 1 ELSE 0 END)  AS critical,
+            SUM(CASE WHEN severity='HIGH'        THEN 1 ELSE 0 END)  AS high,
+            SUM(CASE WHEN severity='MEDIUM'      THEN 1 ELSE 0 END)  AS medium,
+            SUM(CASE WHEN severity='LOW'         THEN 1 ELSE 0 END)  AS low,
+            SUM(CASE WHEN status='open'          THEN 1 ELSE 0 END)  AS open,
+            SUM(CASE WHEN status='remediated'    THEN 1 ELSE 0 END)  AS remediated,
+            SUM(CASE WHEN status='deferred'      THEN 1 ELSE 0 END)  AS deferred,
+            SUM(CASE WHEN status='skipped'       THEN 1 ELSE 0 END)  AS skipped,
+            SUM(CASE WHEN status='rolled_back'   THEN 1 ELSE 0 END)  AS rolled_back,
+            SUM(CASE WHEN category='vulnerability' THEN 1 ELSE 0 END) AS vulnerabilities,
+            SUM(CASE WHEN category='npt'         THEN 1 ELSE 0 END)  AS npts
+        FROM findings WHERE ait_id = :ait_id
+    """), {"ait_id": ait_id}).one()
+
+    pending = db.execute(text("""
+        SELECT COUNT(*) FROM approvals WHERE ait_id = :ait_id AND status = 'pending'
+    """), {"ait_id": ait_id}).scalar() or 0
+
     return {
-        "total": len(findings),
-        "critical": sum(1 for f in findings if f.severity == "CRITICAL"),
-        "high": sum(1 for f in findings if f.severity == "HIGH"),
-        "medium": sum(1 for f in findings if f.severity == "MEDIUM"),
-        "low": sum(1 for f in findings if f.severity == "LOW"),
-        "open": sum(1 for f in findings if f.status == "open"),
-        "remediated": sum(1 for f in findings if f.status == "remediated"),
-        "deferred": sum(1 for f in findings if f.status == "deferred"),
-        "skipped": sum(1 for f in findings if f.status == "skipped"),
-        "rolled_back": sum(1 for f in findings if f.status == "rolled_back"),
-        "vulnerabilities": sum(1 for f in findings if f.category == "vulnerability"),
-        "npts": sum(1 for f in findings if f.category == "npt"),
+        "total":            row.total or 0,
+        "critical":         row.critical or 0,
+        "high":             row.high or 0,
+        "medium":           row.medium or 0,
+        "low":              row.low or 0,
+        "open":             row.open or 0,
+        "remediated":       row.remediated or 0,
+        "deferred":         row.deferred or 0,
+        "skipped":          row.skipped or 0,
+        "rolled_back":      row.rolled_back or 0,
+        "vulnerabilities":  row.vulnerabilities or 0,
+        "npts":             row.npts or 0,
         "pending_approvals": pending,
     }
 
@@ -88,8 +106,7 @@ def create_finding(db: Session, scan_id: int, ait_id: str, f: dict, category: st
         existing.os_target = f.get("os")
         existing.category = category
         existing.updated_at = datetime.utcnow()
-        db.commit()
-        db.refresh(existing)
+        db.flush()   # populate id without committing — caller commits in batch
         return existing
 
     obj = models.Finding(
@@ -105,8 +122,7 @@ def create_finding(db: Session, scan_id: int, ait_id: str, f: dict, category: st
         category=category,
     )
     db.add(obj)
-    db.commit()
-    db.refresh(obj)
+    db.flush()   # sends INSERT, populates obj.id — caller commits in batch
     return obj
 
 
@@ -244,28 +260,24 @@ def list_approvals(
 # ── Package family groups (LLM-computed) ────────────────────────────────────
 
 def upsert_family_groups(db: Session, ait_id: str, groups: list) -> None:
-    """Store LLM-assigned package-family mappings. Upserts by (ait_id, package)."""
+    """Store LLM-assigned package-family mappings. Upserts by (ait_id, package).
+
+    Uses INSERT ... ON CONFLICT DO UPDATE so N packages = 1 query each, no
+    prior SELECT needed — replaces the old N SELECT + N INSERT/UPDATE pattern.
+    """
     for g in groups:
         family = g.get("family", "")
         reason = g.get("reason", "")
         for pkg in g.get("packages", []):
-            existing = (
-                db.query(models.PackageFamilyGroup)
-                .filter(
-                    models.PackageFamilyGroup.ait_id == ait_id,
-                    models.PackageFamilyGroup.package == pkg,
-                )
-                .first()
-            )
-            if existing:
-                existing.family_group = family
-                existing.family_reason = reason
-                existing.computed_at = datetime.utcnow()
-            else:
-                db.add(models.PackageFamilyGroup(
-                    ait_id=ait_id, package=pkg,
-                    family_group=family, family_reason=reason,
-                ))
+            db.execute(text("""
+                INSERT INTO package_family_groups
+                    (ait_id, package, family_group, family_reason, computed_at)
+                VALUES (:ait_id, :pkg, :family, :reason, NOW())
+                ON CONFLICT (ait_id, package) DO UPDATE
+                    SET family_group  = EXCLUDED.family_group,
+                        family_reason = EXCLUDED.family_reason,
+                        computed_at   = NOW()
+            """), {"ait_id": ait_id, "pkg": pkg, "family": family, "reason": reason})
     db.commit()
 
 

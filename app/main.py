@@ -32,15 +32,30 @@ Base.metadata.create_all(bind=engine)
 try:
     from sqlalchemy import text as _sql_text
     with engine.connect() as _conn:
+        # Column migrations
         _conn.execute(_sql_text(
             "ALTER TABLE findings ADD COLUMN IF NOT EXISTS dep_note TEXT"
         ))
         _conn.execute(_sql_text(
             "ALTER TABLE applications ADD COLUMN IF NOT EXISTS dep_report JSON"
         ))
+        # Indexes on the most-filtered findings columns — dramatically speeds up
+        # list_findings and get_app_stats on large datasets.
+        _conn.execute(_sql_text(
+            "CREATE INDEX IF NOT EXISTS ix_findings_ait_id   ON findings (ait_id)"
+        ))
+        _conn.execute(_sql_text(
+            "CREATE INDEX IF NOT EXISTS ix_findings_status   ON findings (ait_id, status)"
+        ))
+        _conn.execute(_sql_text(
+            "CREATE INDEX IF NOT EXISTS ix_findings_category ON findings (ait_id, category)"
+        ))
+        _conn.execute(_sql_text(
+            "CREATE INDEX IF NOT EXISTS ix_findings_severity ON findings (ait_id, severity)"
+        ))
         _conn.commit()
 except Exception as _me:
-    print(f"[startup] column migration skipped: {_me}")
+    print(f"[startup] migration skipped: {_me}")
 
 app = FastAPI(title="VulnGuard AI", version="2.0.0")
 
@@ -424,6 +439,8 @@ def _import_to_db(db, ait_id: str, scan_id: int, raw: list[dict]) -> int:
                     crud.upsert_plan(db, obj.id, None, advisory)
                     crud.update_finding(db, obj.id, plan_status="na")
 
+    # Commit all create_finding flushes in one round-trip instead of per-row.
+    db.commit()
     return total
 
 
