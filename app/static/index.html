@@ -311,9 +311,8 @@ a{color:var(--accent)}
       <div class="header-right">
         <span class="ai-off-badge hidden" id="ai-status-badge" title="Auto-analysis is off (AI_ENABLED=0). Use the Analyze buttons to run on-demand analysis.">🤖 Auto: Off</span>
         <button class="btn btn-primary" id="btn-import" onclick="openModal('modal-import')">↑ Import Scan</button>
-        <button class="btn btn-outline" id="btn-gen-plans" disabled onclick="generateAllPlans()" title="Generate remediation plans for all open vulnerability findings">⚙ Generate Plans</button>
         <div class="header-btn-grp">
-          <button class="btn btn-outline" id="btn-analyze" disabled onclick="openModal('modal-analyze')">🔬 Analyze</button>
+          <button class="btn btn-outline" id="btn-analyze" disabled onclick="openModal('modal-analyze')" title="Generate remediation plans + run Agent Analysis on demand">🔬 Analyze</button>
           <span class="hbg-date" id="analyze-date-hint"></span>
         </div>
         <div class="header-btn-grp">
@@ -527,9 +526,9 @@ a{color:var(--accent)}
     <div class="modal-body">
       <p class="text-sm" style="margin-bottom:14px">Generate or import AI risk analysis for <strong id="analyze-ait-label"></strong></p>
       <div class="plan-section">
-        <h3 style="font-size:13px;margin-bottom:8px">Option A — Run Fresh Analysis</h3>
-        <p class="text-sm" style="margin-bottom:10px">Calls the LLM to analyze all findings. Takes ~30 seconds.</p>
-        <button class="btn btn-primary" onclick="runAnalysis()">🤖 Run Analysis Now</button>
+        <h3 style="font-size:13px;margin-bottom:8px">Option A — Run On-Demand Analysis</h3>
+        <p class="text-sm" style="margin-bottom:10px">Generates remediation plans for all pending findings, then runs Agent Analysis. May take 1–2 minutes depending on finding count.</p>
+        <button class="btn btn-primary" onclick="runAnalysis()">🤖 Generate Plans + Run Analysis</button>
       </div>
       <div class="plan-section" style="margin-top:12px">
         <h3 style="font-size:13px;margin-bottom:8px">Option B — Import Existing Report</h3>
@@ -662,7 +661,6 @@ async function selectAIT(aitId) {
   const app = S.apps.find(a=>a.ait_id===aitId);
   document.getElementById('ait-title').textContent = app ? `${app.ait_id} — ${app.name}` : aitId;
   document.getElementById('ait-sub').textContent = app ? `${app.environment}${app.host?' · '+app.host:''}${app.owner_name?' · '+app.owner_name:''}` : '';
-  document.getElementById('btn-gen-plans').disabled = false;
   document.getElementById('btn-analyze').disabled = false;
   document.getElementById('btn-dep-check').disabled = false;
   document.getElementById('analyze-ait-label').textContent = aitId;
@@ -680,12 +678,6 @@ async function refreshFindings() {
     S.findings = _findings;
     S.stats = computeStatsFromFindings(S.findings);
     renderStats(); renderFindings();
-    // Auto-trigger analysis when AI is on and findings have no analysis yet
-    const hasUnanalyzed = S.findings.length > 0 && S.findings.some(f => !f.analysis_md);
-    if (hasUnanalyzed && S.aiEnabled && S._analysisTriggeredFor !== S.selectedAIT) {
-      S._analysisTriggeredFor = S.selectedAIT;
-      _autoTriggerAnalysis();
-    }
     // Refresh sidebar at most every 15s to avoid unnecessary API round-trips
     if (Date.now() - S._lastSidebarRefresh > 15000) {
       S.apps = await api('GET','/applications');
@@ -693,13 +685,6 @@ async function refreshFindings() {
       renderSidebar();
     }
   } catch(e) { toast('err','Failed to load: '+e.message); }
-}
-
-async function _autoTriggerAnalysis() {
-  try {
-    await api('POST', `/applications/${S.selectedAIT}/analyze`);
-    startAnalysisPoll();
-  } catch(e) { /* silent — per-CVE Analyze buttons are always available as fallback */ }
 }
 
 // ── Stats ──────────────────────────────────────────────────────────────────
@@ -1727,26 +1712,17 @@ async function retryPlan(fid) {
   } catch(e) { toast('err',e.message); }
 }
 
-async function generateAllPlans() {
-  if (!S.selectedAIT) return;
-  const btn = document.getElementById('btn-gen-plans');
-  btn.disabled = true; btn.textContent = '⚙ Generating…';
-  try {
-    const r = await api('POST', `/applications/${S.selectedAIT}/generate-plans`);
-    toast('ok', `Plan generation started for ${r.submitted} finding(s) — page will update automatically.`);
-    startPoll();
-  } catch(e) {
-    toast('err', 'Error: ' + e.message);
-  } finally {
-    btn.disabled = false; btn.textContent = '⚙ Generate Plans';
-  }
-}
-
 async function runAnalysis() {
   if (!S.selectedAIT) return;
   closeModal();
-  toast('info', 'Analysis started — Agent Analysis column will update shortly…');
+  toast('info', 'Generating remediation plans + analysis — columns will update shortly…');
   try {
+    // Step 1: generate remediation plans for all pending findings
+    const planResult = await api('POST', `/applications/${S.selectedAIT}/generate-plans`);
+    if (planResult.submitted > 0) {
+      toast('info', `Remediation plans queued for ${planResult.submitted} finding(s)…`);
+    }
+    // Step 2: run LLM agent analysis
     await api('POST', `/applications/${S.selectedAIT}/analyze`);
     startAnalysisPoll();
   } catch(e) { toast('err', 'Analysis error: ' + e.message); }

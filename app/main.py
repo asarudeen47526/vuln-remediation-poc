@@ -429,11 +429,7 @@ def _import_to_db(db, ait_id: str, scan_id: int, raw: list[dict]) -> int:
                 crud.update_finding(db, obj.id, plan_status="na")
         else:  # vulnerability
             ecosystem = _detect_ecosystem(f.get("package", ""), f.get("os", ""))
-            if ecosystem == "os":
-                # OS package — Ansible/dnf pipeline applies
-                if obj.plan_status not in ("ready",) and AI_ENABLED:
-                    _executor.submit(_gen_plan_bg, obj.id)
-            else:
+            if ecosystem != "os":
                 # Application-bundled library — realistic build-system advisory
                 if obj.plan_status != "na":
                     advisory = _app_lib_advisory(
@@ -489,12 +485,6 @@ async def import_scan(
     scan = crud.create_scan(db, ait_id, file.filename or "upload.json", len(raw))
     total = _import_to_db(db, ait_id, scan.id, raw)
 
-    if total > 0 and AI_ENABLED:
-        pkgs = sorted({f["package"] for f in raw if f.get("package")})
-        _executor.submit(_run_analysis_bg, ait_id)
-        if pkgs:
-            _executor.submit(_compute_groups_bg, ait_id, pkgs)
-
     return {"scan_id": scan.id, "imported": total, "ait_id": ait_id}
 
 
@@ -518,12 +508,6 @@ async def import_scan_create(
 
     scan = crud.create_scan(db, ait_id, file.filename or "upload.json", len(raw))
     total = _import_to_db(db, ait_id, scan.id, raw)
-
-    if total > 0 and AI_ENABLED:
-        pkgs = sorted({f["package"] for f in raw if f.get("package")})
-        _executor.submit(_run_analysis_bg, ait_id)
-        if pkgs:
-            _executor.submit(_compute_groups_bg, ait_id, pkgs)
 
     return {"scan_id": scan.id, "imported": total, "ait_id": ait_id, "created": True}
 

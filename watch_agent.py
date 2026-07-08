@@ -321,11 +321,6 @@ def main() -> None:
                     _log("All findings have analysis. Nothing to do this cycle.")
                     _trigger_compute_groups()
 
-            # Kick remediation plans regardless of AI_ENABLED (DRY_RUN plans need no LLM)
-            submitted = _trigger_plans()
-            if submitted:
-                _log(f"Triggered remediation plan generation for {submitted} finding(s).")
-
             _log(f"Sleeping {WATCH_INTERVAL * 2}s (DRY_RUN — report never changes)…")
             time.sleep(WATCH_INTERVAL * 2)
             continue
@@ -348,14 +343,10 @@ def main() -> None:
         _log(f"New report detected: {report_path}")
         last_processed_mtime = mtime
 
-        # Step 1 — import findings → plan generation starts automatically
+        # Step 1 — import findings (plans generated on demand via UI Analyze button)
         n = _import_scan(report_path)
         if n:
-            _log(f"Imported {n} finding(s). Remediation plans generating in background…")
-        else:
-            submitted = _trigger_plans()
-            if submitted:
-                _log(f"Triggered plan generation for {submitted} existing finding(s).")
+            _log(f"Imported {n} finding(s). Use the UI '🔬 Analyze' button to generate plans + analysis.")
 
         # Step 2 — LLM analysis (only when AI is enabled)
         if AI_ENABLED:
