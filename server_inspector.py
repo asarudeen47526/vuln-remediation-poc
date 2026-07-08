@@ -49,7 +49,9 @@ class PackageInspection:
     repo_name: str                    # source repository name
     rhel_version: str                 # e.g. "Red Hat Enterprise Linux release 8.8"
     rhsa_advisories: List[str]        = field(default_factory=list)  # ["RHSA-2024:1234", ...]
-    module_stream: str                = ""     # e.g. "python39:3.9" on RHEL 8/9
+    module_stream: str                = ""     # currently installed/enabled stream, e.g. "nginx:1.14"
+    enabled_module_stream: str        = ""     # explicitly enabled stream (from [e] flag)
+    available_module_streams: List[str] = field(default_factory=list)  # all streams: ["nginx:1.14", "nginx:1.22", ...]
     subscription_ok: bool             = True
     needs_reboot: bool                = False  # from needs-restarting -r
     impacted_services: List[str]      = field(default_factory=list)  # needs-restarting -s output
@@ -108,6 +110,16 @@ dnf module list --installed 2>/dev/null | awk 'NR>2 && NF>=2 {print $1":"$2}' \
   | grep -vi "^name:" | head -30 || echo "__NONE__"
 rpm -q --queryformat '%{RELEASE}\n' "$PKG" 2>/dev/null \
   | grep -oE '\.[a-z]+[0-9]+\.' || true
+
+echo "### MODULE_STREAMS_AVAIL ###"
+dnf module list "$PKG" 2>/dev/null \
+  | grep "^$PKG " | awk '{print $1":"$2}' \
+  || echo "__NONE__"
+
+echo "### MODULE_STREAM_ENABLED ###"
+dnf module list "$PKG" 2>/dev/null \
+  | grep "^$PKG " | grep '\[e\]' | awk '{print $1":"$2}' \
+  || echo "__NONE__"
 
 echo "### RPM_FILES ###"
 rpm -ql "$PKG" 2>/dev/null | grep -v "not installed" | head -5 || echo "__NONE__"
@@ -180,6 +192,8 @@ def inspect_package(package: str, host: str = "", user: str = "", key: str = "")
     dnf_available = _section(output, "DNF_AVAILABLE")
     updateinfo    = _section(output, "UPDATEINFO")
     module_raw    = _section(output, "MODULE_STREAM")
+    streams_avail_raw = _section(output, "MODULE_STREAMS_AVAIL")
+    stream_enabled_raw = _section(output, "MODULE_STREAM_ENABLED")
     rpm_files     = _section(output, "RPM_FILES")
     whatrequires  = _section(output, "RPM_WHATREQUIRES")
     scl_raw       = _section(output, "SCL")
@@ -215,11 +229,30 @@ def inspect_package(package: str, host: str = "", user: str = "", key: str = "")
     # ── module stream ─────────────────────────────────────────────────────────
     module_stream = ""
     if "__NONE__" not in module_raw and module_raw.strip():
-        # look for lines matching package name
         for ln in module_raw.splitlines():
             if package.lower() in ln.lower() and ":" in ln:
                 module_stream = ln.strip()
                 break
+
+    # All available streams for this package (from dnf module list <pkg>)
+    available_streams: List[str] = []
+    if "__NONE__" not in streams_avail_raw and streams_avail_raw.strip():
+        for ln in streams_avail_raw.splitlines():
+            ln = ln.strip()
+            if ":" in ln and ln:
+                available_streams.append(ln)
+
+    # Currently [e]nabled stream (explicit — from MODULE_STREAM_ENABLED section)
+    enabled_stream = ""
+    if "__NONE__" not in stream_enabled_raw and stream_enabled_raw.strip():
+        for ln in stream_enabled_raw.splitlines():
+            ln = ln.strip()
+            if ":" in ln and ln:
+                enabled_stream = ln
+                break
+    # Fall back: if no explicit [e] marker found, use the first installed stream
+    if not enabled_stream and module_stream:
+        enabled_stream = module_stream
 
     # ── install method (RHEL priority order — air-gapped environment) ────────
     # Language PMs first (these are app-level, not system-level)
@@ -335,6 +368,8 @@ def inspect_package(package: str, host: str = "", user: str = "", key: str = "")
         rhel_version=rhel_ver_raw.splitlines()[0].strip() if rhel_ver_raw else "unknown",
         rhsa_advisories=rhsa_list,
         module_stream=module_stream,
+        enabled_module_stream=enabled_stream,
+        available_module_streams=available_streams,
         subscription_ok=sub_ok,
         needs_reboot=reboot_needed,
         impacted_services=impacted,
@@ -346,7 +381,41 @@ def inspect_package(package: str, host: str = "", user: str = "", key: str = "")
 
 # ── Dry-run mock ──────────────────────────────────────────────────────────────
 
+_DNF_MODULE_PACKAGES = {
+    "nginx", "nodejs", "python3", "python39", "python38", "ruby", "php",
+    "postgresql", "mysql", "redis", "mongodb", "perl",
+}
+
+
 def _dry_inspection(package: str) -> PackageInspection:
+    is_module_pkg = package.lower() in _DNF_MODULE_PACKAGES
+    if is_module_pkg:
+        return PackageInspection(
+            package=package,
+            install_method="dnf_module",
+            current_version=f"{package}-1.14.1-9.0.1.module+el8.0.0+5347.x86_64",
+            new_version="(in target stream — check dnf module list)",
+            install_path=f"/usr/sbin/{package}",
+            repo_name="ol8_appstream",
+            rhel_version="Oracle Linux Server release 8.10",
+            rhsa_advisories=[],
+            module_stream=f"{package}:1.14",
+            enabled_module_stream=f"{package}:1.14",
+            available_module_streams=[
+                f"{package}:1.14", f"{package}:1.16", f"{package}:1.18",
+                f"{package}:1.20", f"{package}:1.22", f"{package}:1.24",
+            ],
+            subscription_ok=True,
+            needs_reboot=False,
+            impacted_services=[f"{package}.service"],
+            dependent_packages=[],
+            rpm_integrity="ok",
+            notes=(
+                f"[DRY_RUN] Mock OL8 module inspection — no SSH made. "
+                f"Package delivered via AppStream module stream {package}:1.14 (enabled). "
+                f"To upgrade to a higher version, use dnf module switch-to <target_stream>."
+            ),
+        )
     return PackageInspection(
         package=package,
         install_method="dnf",
@@ -357,6 +426,8 @@ def _dry_inspection(package: str) -> PackageInspection:
         rhel_version="Red Hat Enterprise Linux release 9.3 (Plow)",
         rhsa_advisories=[],
         module_stream="",
+        enabled_module_stream="",
+        available_module_streams=[],
         subscription_ok=True,
         needs_reboot=False,
         impacted_services=[],
@@ -385,7 +456,19 @@ def format_for_llm(insp: PackageInspection) -> str:
                      f"(informational — from local repo metadata; servers are air-gapped)")
     else:
         lines.append("RHSA advisory IDs: none in local repo metadata")
-    if insp.module_stream:
+    if insp.enabled_module_stream or insp.module_stream:
+        cur = insp.enabled_module_stream or insp.module_stream
+        lines.append(f"Enabled stream  : {cur}  ← currently active on this host")
+    if insp.available_module_streams:
+        lines.append(f"Available streams: {', '.join(insp.available_module_streams)}")
+        lines.append(
+            "STREAM UPGRADE NOTE: 'dnf module update <current_stream>' only updates "
+            "packages WITHIN the same stream. To move to a higher version stream "
+            "(e.g. nginx:1.14 → nginx:1.22) you MUST use "
+            "'dnf module switch-to <target_stream>' and set module_stream in the plan "
+            "to the TARGET stream, not the current one."
+        )
+    elif insp.module_stream:
         lines.append(f"AppStream module: {insp.module_stream}  "
                      f"← update via 'dnf module update {insp.module_stream}'")
     if insp.impacted_services:

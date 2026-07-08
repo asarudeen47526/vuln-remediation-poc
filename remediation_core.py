@@ -48,9 +48,23 @@ RHEL remediation strategies by install_method:
 
   dnf_module   — AppStream module stream (RHEL 8/9, PREFERRED for stream packages).
                  action: update_package
-                 Use: dnf module update <module>:<stream>
-                 Set module_stream field (e.g. "nodejs:18", "python39:3.9").
-                 The local repo must contain the updated module stream packages.
+                 The inspection block shows "Enabled stream" (currently active) and
+                 "Available streams" (all streams the local repo knows about).
+
+                 SAME-STREAM update (CVE fix is available within the current stream):
+                   Use: dnf module update <module>:<current_stream>
+                   Set module_stream to the CURRENT enabled stream (e.g. "nginx:1.22").
+
+                 CROSS-STREAM upgrade (CVE fix requires a HIGHER version stream):
+                   Use: dnf module switch-to <module>:<target_stream>
+                   Set module_stream to the TARGET stream — NOT the current one.
+                   Example: enabled=nginx:1.14, fixed_version=1.22.x →
+                     module_stream: "nginx:1.22", strategy: "dnf module switch-to nginx:1.22"
+                   The target stream is inferred from fixed_version: e.g. 1.22.x → stream 1.22.
+
+                 IMPORTANT: dnf module update within the current stream will NOT install
+                 packages from a different (higher) stream. Cross-stream upgrades MUST
+                 use switch-to. Always set module_stream to the TARGET (fixed) stream.
 
   dnf          — Standard dnf update against local repo.
                  action: update_package
@@ -257,7 +271,7 @@ def make_plan(finding: dict, context_text: str = "") -> dict:
         '  "services_to_restart": ["<systemd-service-name>", ...],\n'
         '  "reason": "<why this CVE is exploitable and why this remediation approach>",\n'
         f'  "restore_plan": "<auto-rollback: dnf history undo last restores {installed}, then listed services restart>",\n'
-        '  "module_stream": "<module:stream — required for dnf_module method, e.g. nodejs:18>",\n'
+        '  "module_stream": "<TARGET stream for dnf_module — use the stream containing the fix, NOT the currently enabled one. E.g. nginx:1.14 enabled but fix needs 1.22 → set nginx:1.22>",\n'
         '  "manual_steps": "<RHEL operator instructions — required for manual_required>",\n'
         '  "rpm_url": "<internal .rpm path or URL — for rpm_manual only (NOT Red Hat CDN)>",\n'
         '  "pip_package": "<pip package name — only when it differs from the RPM package name>"\n'

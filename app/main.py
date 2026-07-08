@@ -538,6 +538,30 @@ def get_finding(finding_id: int, db: Session = Depends(get_db)):
     return _finding_to_dict(f)
 
 
+@app.get("/api/v1/findings/{finding_id}/actions")
+def list_finding_actions(finding_id: int, db: Session = Depends(get_db)):
+    """Return all remediation/rollback actions for a finding, newest first."""
+    if not crud.get_finding(db, finding_id):
+        raise HTTPException(404)
+    actions = (
+        db.query(models.RemediationAction)
+        .filter(models.RemediationAction.finding_id == finding_id)
+        .order_by(models.RemediationAction.created_at.desc())
+        .all()
+    )
+    return [
+        {
+            "id": a.id,
+            "action_type": a.action_type,
+            "success": a.success,
+            "ansible_output": a.ansible_output or "",
+            "performed_by": a.performed_by,
+            "created_at": a.created_at.isoformat() if a.created_at else None,
+        }
+        for a in actions
+    ]
+
+
 @app.post("/api/v1/findings/{finding_id}/generate-plan")
 def generate_plan(finding_id: int, db: Session = Depends(get_db)):
     f = crud.get_finding(db, finding_id)
@@ -707,7 +731,7 @@ def remediate(finding_id: int, db: Session = Depends(get_db)):
 
     audit("web-ui", finding_dict, plan, "success" if success else "failed_rolled_back")
 
-    return {"success": success, "status": new_status, "rc": rc, "output": output[:500]}
+    return {"success": success, "status": new_status, "rc": rc, "output": output[:5000]}
 
 
 @app.post("/api/v1/applications/{ait_id}/remediate-bulk")
@@ -758,7 +782,7 @@ def remediate_bulk(ait_id: str, data: schemas.BulkRemediateRequest, db: Session 
         "severity": rep.severity,
     }, plan, "success" if success else "failed_rolled_back")
     return {"success": success, "status": new_status, "rc": rc,
-            "remediated_count": len(findings), "output": output[:500]}
+            "remediated_count": len(findings), "output": output[:5000]}
 
 
 @app.post("/api/v1/findings/{finding_id}/defer")

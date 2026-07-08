@@ -507,6 +507,20 @@ a{color:var(--accent)}
     <div class="modal-body" id="apv-list-body"><div class="empty-state" style="padding:30px"><div class="empty-icon">✅</div><div class="empty-title">No pending approvals</div></div></div>
   </div>
 
+  <!-- Execution Log -->
+  <div class="modal modal-lg hidden" id="modal-execlog">
+    <div class="modal-hdr"><h2>Execution Log</h2><button class="close-btn" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div id="execlog-meta" style="margin-bottom:14px"></div>
+      <div style="margin-bottom:8px;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.05em">Ansible Output</div>
+      <pre id="execlog-output" style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:14px;font-size:12px;line-height:1.6;overflow-x:auto;white-space:pre-wrap;word-break:break-all;max-height:400px;overflow-y:auto;color:var(--text1)"></pre>
+      <div id="execlog-all-actions" style="margin-top:16px"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal()">Close</button>
+    </div>
+  </div>
+
   <!-- Analyze modal -->
   <div class="modal hidden" id="modal-analyze">
     <div class="modal-hdr"><h2>Agent Analysis</h2><button class="close-btn" onclick="closeModal()">✕</button></div>
@@ -966,12 +980,17 @@ function planColHtml(f) {
   if (!f.plan) return `<div class="col-label">Remediation Plan</div><div class="no-data">No plan yet<br><button class="link-btn" onclick="retryPlan(${f.id})">Generate</button></div>`;
   const p = f.plan;
   const svc = p.services_to_restart||'none';
+  const strategy = p.plan_json?.remediation_strategy || p.remediation_strategy || '';
+  const stream = p.plan_json?.module_stream || p.module_stream || '';
   return `<div class="col-label">Remediation Plan</div>
   <div class="detail-grid">
     <span class="dk">Action</span><span class="dv">${esc(p.action||'—')}</span>
-    <span class="dk">Reboot</span><span class="dv">${p.reboot_required?'⚠ Yes':'No'}</span>
+    <span class="dk">Method</span><span class="dv mono">${esc(p.plan_json?.install_method||'dnf')}</span>
+    ${stream?`<span class="dk">Stream</span><span class="dv mono">${esc(stream)}</span>`:''}
+    ${strategy?`<span class="dk">Command</span><span class="dv mono" style="font-size:11px;word-break:break-all">${esc(strategy)}</span>`:''}
     <span class="dk">Services</span><span class="dv mono">${esc(svc)}</span>
-    <span class="dk">Reason</span><span class="dv">${esc((p.reason||'').substring(0,240))}</span>
+    <span class="dk">Reboot</span><span class="dv">${p.reboot_required?'⚠ Yes':'No'}</span>
+    <span class="dk">Reason</span><span class="dv">${esc((p.reason||'').substring(0,300))}</span>
   </div>
   ${p.restore_plan?`<div class="restore-box"><span class="restore-lbl">Auto-rollback</span>${esc(p.restore_plan.substring(0,200))}</div>`:''}`;
 }
@@ -998,7 +1017,7 @@ function actionsHtml(f) {
     } else if (isRem && f.pending_rollback_token) {
       rollBtn = `<span class="action-sep"></span><button class="btn btn-warn" onclick="manageApproval(${f.id},'${f.pending_rollback_token}')">⏳ Pending Approval</button>`;
     } else if (isRem) {
-      rollBtn = `<span class="action-sep"></span><button class="btn btn-warn" onclick="showRollbackModal(${f.id})">↩ Request Rollback</button>`;
+      rollBtn = `<span class="action-sep"></span><button class="btn btn-ghost" onclick="viewExecLog(${f.id})">📋 View Log</button><span class="action-sep"></span><button class="btn btn-warn" onclick="showRollbackModal(${f.id})">↩ Request Rollback</button>`;
     } else {
       rollBtn = `<span class="action-sep"></span><button class="btn btn-ghost" disabled title="Available after remediation">↩ Rollback</button>`;
     }
@@ -1412,12 +1431,17 @@ async function remediateGroup(ids) {
   S.pendingFindingId = null;
   const p = rep.plan;
   const cveList = S.findings.filter(f => ids.includes(f.id)).map(f => f.cve_id).join(', ');
+  const pj2 = p.plan_json || {};
   document.getElementById('rem-plan-kv').innerHTML = `
     <span class="k">Action</span><span class="v">${esc(p.action)}</span>
     <span class="k">Package</span><span class="v">${esc(p.package)}</span>
+    <span class="k">Install method</span><span class="v mono">${esc(pj2.install_method||'dnf')}</span>
+    ${pj2.module_stream?`<span class="k">Module stream</span><span class="v mono">${esc(pj2.module_stream)}</span>`:''}
+    ${pj2.remediation_strategy?`<span class="k">Command</span><span class="v mono" style="font-size:12px;word-break:break-all">${esc(pj2.remediation_strategy)}</span>`:''}
     <span class="k">Fixes CVEs</span><span class="v" style="word-break:break-all;font-size:12px">${esc(cveList)}</span>
     <span class="k">Services to restart</span><span class="v">${esc(p.services_to_restart||'none')}</span>
     <span class="k">Reboot required</span><span class="v">${p.reboot_required?'⚠ Yes':'No'}</span>
+    ${pj2.impact_assessment?`<span class="k">Impact</span><span class="v">${esc(pj2.impact_assessment)}</span>`:''}
     <span class="k">Reason</span><span class="v">${esc(p.reason||'—')}</span>`;
   document.getElementById('rem-restore-text').textContent = p.restore_plan || 'dnf history undo last (automatic)';
   _renderRemediateWorkflow(rep);
@@ -1437,13 +1461,18 @@ async function remediateFamily(sortedIds, family, event) {
   const p = rep.plan;
   const cveList = findings.map(f => f.cve_id).join(', ');
   const pkgList = [...new Set(findings.map(f => f.package))].join(', ');
+  const pj3 = p.plan_json || {};
   document.getElementById('rem-plan-kv').innerHTML = `
     <span class="k">Action</span><span class="v">${esc(p.action)}</span>
     <span class="k">Family</span><span class="v">${esc(family)}</span>
     <span class="k">Packages</span><span class="v" style="font-size:12px">${esc(pkgList)}</span>
+    <span class="k">Install method</span><span class="v mono">${esc(pj3.install_method||'dnf')}</span>
+    ${pj3.module_stream?`<span class="k">Module stream</span><span class="v mono">${esc(pj3.module_stream)}</span>`:''}
+    ${pj3.remediation_strategy?`<span class="k">Command</span><span class="v mono" style="font-size:12px;word-break:break-all">${esc(pj3.remediation_strategy)}</span>`:''}
     <span class="k">Fixes CVEs</span><span class="v" style="word-break:break-all;font-size:12px">${esc(cveList)}</span>
     <span class="k">Services to restart</span><span class="v">${esc(p.services_to_restart||'none')}</span>
     <span class="k">Reboot required</span><span class="v">${p.reboot_required?'⚠ Yes':'No'}</span>
+    ${pj3.impact_assessment?`<span class="k">Impact</span><span class="v">${esc(pj3.impact_assessment)}</span>`:''}
     <span class="k">Reason</span><span class="v">${esc(p.reason||'—')}</span>`;
   document.getElementById('rem-restore-text').textContent = p.restore_plan || 'dnf history undo last (automatic)';
   _renderRemediateWorkflow(rep);
@@ -1453,17 +1482,21 @@ async function remediateFamily(sortedIds, family, event) {
 // ── Actions ────────────────────────────────────────────────────────────────
 function _renderRemediateWorkflow(f) {
   const p = f?.plan;
+  const pj = p?.plan_json || {};
   const pkg = p?.package || f?.package || 'package';
   const svcs = p?.services_to_restart || 'none';
+  const method = pj.install_method || 'dnf';
+  const strategy = pj.remediation_strategy || `dnf update ${pkg}`;
   const rollback = p?.restore_plan
     ? p.restore_plan.substring(0, 150)
     : `dnf history undo last — restores ${pkg} to prior installed version`;
   const steps = [
-    {icon:'✅', title:'Plan Validated', desc:`Action: ${p?.action||'—'} · Package: ${pkg}${p?.reboot_required?' · ⚠ Reboot required':''}`, done:true},
+    {icon:'✅', title:'Plan Validated', desc:`Action: ${p?.action||'—'} · Method: ${method} · Package: ${pkg}${p?.reboot_required?' · ⚠ Reboot required':''}`, done:true},
+    {icon:'🧠', title:'LLM Decision', desc:`Strategy: ${strategy}`, mono:true},
     {icon:'👤', title:'Human Approval', desc:'You are here — click Approve & Execute to proceed', pending:true},
-    {icon:'🤖', title:'Ansible Execution', desc:`ansible-playbook patch.yml -e pkg=${pkg} -e health_url=<HEALTH_URL>`, mono:true},
+    {icon:'🤖', title:'Ansible Execution', desc:strategy, mono:true},
     {icon:'🔁', title:'Service Restart', desc:`Services restarted after patch: ${svcs}`},
-    {icon:'🏥', title:'Smoke Test', desc:'HTTP health check — endpoint must return 2xx; failure triggers automatic rollback'},
+    {icon:'🏥', title:'Smoke Test', desc:`rpm -q ${pkg} (version check) + systemctl is-active (service check) — failure triggers automatic rollback`},
     {icon:'↩', title:'Auto-Rollback', desc:rollback},
   ];
   const stepsHtml = steps.map((s, i) => `
@@ -1484,12 +1517,20 @@ function showRemediateModal(fid) {
   if (!f||!f.plan) return toast('err','No plan available');
   S.pendingFindingId = fid;
   const p = f.plan;
+  const pj = p.plan_json || {};
   const svc = p.services_to_restart||'none';
+  const strategy = pj.remediation_strategy || '';
+  const impact = pj.impact_assessment || '';
+  const stream = pj.module_stream || '';
   document.getElementById('rem-plan-kv').innerHTML = `
     <span class="k">Action</span><span class="v">${esc(p.action)}</span>
     <span class="k">Package</span><span class="v">${esc(p.package)}</span>
+    <span class="k">Install method</span><span class="v mono">${esc(pj.install_method||'dnf')}</span>
+    ${stream?`<span class="k">Module stream</span><span class="v mono">${esc(stream)}</span>`:''}
+    ${strategy?`<span class="k">Command</span><span class="v mono" style="font-size:12px;word-break:break-all">${esc(strategy)}</span>`:''}
     <span class="k">Services to restart</span><span class="v">${esc(svc)}</span>
     <span class="k">Reboot required</span><span class="v">${p.reboot_required?'⚠ Yes':'No'}</span>
+    ${impact?`<span class="k">Impact</span><span class="v">${esc(impact)}</span>`:''}
     <span class="k">Reason</span><span class="v">${esc(p.reason||'—')}</span>`;
   document.getElementById('rem-restore-text').textContent = p.restore_plan||'dnf history undo last (automatic)';
   _renderRemediateWorkflow(f);
@@ -1516,6 +1557,11 @@ async function confirmRemediation() {
       : 'Remediation failed — rolled back automatically';
     toast(r.success ? 'ok' : 'err', msg);
     await refreshFindings();
+    // Show execution log immediately using the output returned in the response
+    const logFid = fid || (gids && gids[0]);
+    if (logFid && r.output) {
+      _showExecLogFromOutput(logFid, r);
+    }
   } catch(e) { toast('err', 'Error: ' + e.message); }
   finally {
     btn.disabled = false;
@@ -1549,6 +1595,70 @@ function showRollbackModal(fid) {
   document.getElementById('rb-restore-text').textContent = restoreText;
   document.getElementById('rb-approver-email').value = '';
   openModal('modal-rollback-req');
+}
+
+// ── Execution Log ──────────────────────────────────────────────────────────
+function _showExecLogFromOutput(fid, r) {
+  const statusIcon = r.success ? '✅' : '❌';
+  const statusLabel = r.success ? 'Success' : 'Failed — rolled back automatically';
+  document.getElementById('execlog-meta').innerHTML = `
+    <div class="detail-grid">
+      <span class="dk">Status</span><span class="dv">${statusIcon} ${esc(statusLabel)}</span>
+      <span class="dk">Finding ID</span><span class="dv">#${fid}</span>
+    </div>`;
+  document.getElementById('execlog-output').textContent = r.output || '(no output captured — DRY_RUN mode or manual action)';
+  document.getElementById('execlog-all-actions').innerHTML = `<button class="link-btn" onclick="viewExecLog(${fid},true)">↻ Load full history from DB</button>`;
+  openModal('modal-execlog');
+}
+
+async function viewExecLog(fid, skipOpen) {
+  try {
+    const actions = await api('GET', `/findings/${fid}/actions`);
+    if (!actions || !actions.length) return toast('warn', 'No execution log found for this finding');
+    const latest = actions[0];
+    const statusIcon = latest.success ? '✅' : latest.success === false ? '❌' : '—';
+    const statusLabel = latest.success ? 'Success' : latest.success === false ? 'Failed — rolled back automatically' : 'Unknown';
+    document.getElementById('execlog-meta').innerHTML = `
+      <div class="detail-grid">
+        <span class="dk">Status</span><span class="dv">${statusIcon} ${esc(statusLabel)}</span>
+        <span class="dk">Action</span><span class="dv">${esc(latest.action_type)}</span>
+        <span class="dk">Time</span><span class="dv">${latest.created_at ? new Date(latest.created_at).toLocaleString() : '—'}</span>
+      </div>`;
+    document.getElementById('execlog-output').textContent = latest.ansible_output || '(no output captured — DRY_RUN mode or manual action)';
+    // Show history of all actions
+    if (actions.length > 1) {
+      const rows = actions.map((a, i) => {
+        const ic = a.success ? '✅' : a.success === false ? '❌' : '—';
+        const ts = a.created_at ? new Date(a.created_at).toLocaleString() : '—';
+        return `<div class="wf-step" style="cursor:pointer" onclick="viewExecLogEntry(${fid},${i})">
+          <span class="wf-icon">${ic}</span>
+          <div class="wf-body"><span class="wf-title">${esc(a.action_type)}</span><span class="wf-desc">${ts}</span></div>
+        </div>`;
+      }).join('');
+      document.getElementById('execlog-all-actions').innerHTML =
+        `<div style="margin-top:8px;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.05em">All Actions (${actions.length})</div>
+         <div class="wf-steps" style="margin-top:8px">${rows}</div>`;
+      document._execLogActions = actions;
+    } else {
+      document.getElementById('execlog-all-actions').innerHTML = '';
+    }
+    if (!skipOpen) openModal('modal-execlog');
+  } catch(e) { toast('err', 'Failed to load log: ' + e.message); }
+}
+
+function viewExecLogEntry(fid, idx) {
+  const actions = document._execLogActions;
+  if (!actions || !actions[idx]) return;
+  const a = actions[idx];
+  document.getElementById('execlog-output').textContent = a.ansible_output || '(no output)';
+  const ic = a.success ? '✅' : a.success === false ? '❌' : '—';
+  const ts = a.created_at ? new Date(a.created_at).toLocaleString() : '—';
+  document.getElementById('execlog-meta').innerHTML = `
+    <div class="detail-grid">
+      <span class="dk">Status</span><span class="dv">${ic} ${a.success ? 'Success' : 'Failed'}</span>
+      <span class="dk">Action</span><span class="dv">${esc(a.action_type)}</span>
+      <span class="dk">Time</span><span class="dv">${ts}</span>
+    </div>`;
 }
 
 async function submitRollbackRequest() {
