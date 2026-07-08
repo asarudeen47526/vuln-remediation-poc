@@ -143,6 +143,8 @@ def _gen_plan_bg(finding_id: int):
     finally:
         db.close()  # release connection before LLM call
 
+    print(f"[plan-bg] generating plan for finding {finding_id} ({pkg} / {cve_id})")
+
     # ── Step 2: plan generation (LLM only in live mode with AI enabled) ──────
     plan = None
     error = None
@@ -169,6 +171,8 @@ def _gen_plan_bg(finding_id: int):
         plan, error = None, f"LLM not configured — {exc}"
     except Exception as exc:  # noqa: BLE001
         plan, error = None, str(exc)
+
+    print(f"[plan-bg] finding {finding_id}: {'ready' if plan else 'error — ' + str(error)}")
 
     # ── Step 3: write result (fast) ──────────────────────────────────────────
     db = SessionLocal()

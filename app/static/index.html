@@ -970,7 +970,12 @@ function analysisColHtml(f) {
 }
 
 function planColHtml(f) {
-  if (f.plan_status==='pending') return `<div class="col-label">Remediation Plan</div><div class="no-data"><span style="font-size:12px;color:var(--text2)">Plan not yet generated — click <strong>🔬 Analyze</strong> to generate</span></div>`;
+  if (f.plan_status==='pending') {
+    if (S._plansGeneratingFor === S.selectedAIT) {
+      return `<div class="col-label">Remediation Plan</div><div class="plan-loading"><span class="spinner"></span> Generating plan…<span style="font-size:11px;color:var(--text3);margin-left:6px">will appear automatically</span></div>`;
+    }
+    return `<div class="col-label">Remediation Plan</div><div class="no-data"><span style="font-size:12px;color:var(--text2)">Plan not yet generated — click <strong>🔬 Analyze</strong> to generate</span></div>`;
+  }
   if (f.plan_status==='na') { const adv=f.plan?.plan_error||'No fix available.'; return `<div class="col-label">Remediation Plan</div><div class="no-data"><span style="font-size:12px;color:var(--text2);line-height:1.5">${esc(adv)}</span></div>`; }
   if (f.plan_status==='error') return `<div class="col-label">Remediation Plan</div><div class="plan-error">⚠ ${esc(f.plan?.plan_error||'error')}<br><button class="link-btn" onclick="retryPlan(${f.id})">Retry</button></div>`;
   if (!f.plan) return `<div class="col-label">Remediation Plan</div><div class="no-data">No plan yet<br><button class="link-btn" onclick="retryPlan(${f.id})">Generate</button></div>`;
@@ -1728,15 +1733,18 @@ async function runAnalysis() {
   closeModal();
   toast('info', 'Generating remediation plans + analysis — columns will update shortly…');
   try {
-    // Step 1: generate remediation plans for all pending findings
+    // Step 1: generate remediation plans for all pending/error findings
     const planResult = await api('POST', `/applications/${S.selectedAIT}/generate-plans`);
     if (planResult.submitted > 0) {
+      S._plansGeneratingFor = S.selectedAIT; // show spinner in plan column
       toast('info', `Remediation plans queued for ${planResult.submitted} finding(s)…`);
     }
+    // Refresh immediately so the UI reflects the server's updated plan_status
+    await refreshFindings();
     // Step 2: run LLM agent analysis
     await api('POST', `/applications/${S.selectedAIT}/analyze`);
-    startPoll();
-    startAnalysisPoll();
+    startPoll();          // polls every 4 s until all plans are ready
+    startAnalysisPoll();  // polls every 5 s until all analysis_md populated
   } catch(e) { toast('err', 'Analysis error: ' + e.message); }
 }
 
@@ -1982,10 +1990,16 @@ async function openPendingApprovals() {
 // ── Poll for pending plans ─────────────────────────────────────────────────
 function startPoll() {
   if (S.pollTimer) clearInterval(S.pollTimer);
-  S.pollTimer = setInterval(async ()=>{
-    const hasPending = S.findings.some(f=>f.plan_status==='pending');
-    if (!hasPending) { clearInterval(S.pollTimer); S.pollTimer=null; return; }
-    await refreshFindings();
+  let ticks = 0;
+  S.pollTimer = setInterval(async () => {
+    await refreshFindings();          // always refresh first — never check stale cache
+    ticks++;
+    const hasPending = S.findings.some(f => f.plan_status === 'pending');
+    if (!hasPending || ticks >= 30) { // stop when done or after 2 min max
+      clearInterval(S.pollTimer);
+      S.pollTimer = null;
+      S._plansGeneratingFor = null;
+    }
   }, 4000);
 }
 
