@@ -774,6 +774,18 @@ def skip(finding_id: int, db: Session = Depends(get_db)):
     return {"status": "skipped"}
 
 
+@app.post("/api/v1/findings/{finding_id}/reopen")
+def reopen(finding_id: int, db: Session = Depends(get_db)):
+    f = crud.get_finding(db, finding_id)
+    if not f:
+        raise HTTPException(404)
+    if f.status not in ("deferred", "skipped", "rolled_back"):
+        raise HTTPException(400, f"Cannot reopen: current status is '{f.status}'")
+    crud.update_finding(db, finding_id, status="open")
+    crud.create_action(db, finding_id, f.ait_id, "reopen", success=True)
+    return {"status": "open"}
+
+
 @app.post("/api/v1/findings/{finding_id}/request-rollback")
 def request_rollback(
     finding_id: int,

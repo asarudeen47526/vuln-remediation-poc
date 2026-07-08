@@ -238,6 +238,9 @@ a{color:var(--accent)}
 .md-code { font-family:monospace; font-size:11px; background:var(--surface2); padding:1px 4px; border-radius:3px; color:var(--mono); }
 .md-ul { margin:4px 0 4px 16px; padding:0; }
 .md-ul li { margin-bottom:2px; }
+/* ── Header button groups with date hints ─────────────────────────────────── */
+.header-btn-grp{display:flex;flex-direction:column;align-items:center;gap:2px}
+.hbg-date{font-size:10px;color:var(--text3);white-space:nowrap;text-align:center;min-height:14px}
 /* ── Filter bar ─────────────────────────────────────────────────────────── */
 .filter-bar{display:flex;align-items:center;gap:10px;padding:10px 20px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0;flex-wrap:wrap}
 .search-wrap{flex:1;min-width:180px;max-width:380px;position:relative}
@@ -309,8 +312,14 @@ a{color:var(--accent)}
         <span class="ai-off-badge hidden" id="ai-status-badge" title="Auto-analysis is off (AI_ENABLED=0). Use the Analyze buttons to run on-demand analysis.">🤖 Auto: Off</span>
         <button class="btn btn-primary" id="btn-import" onclick="openModal('modal-import')">↑ Import Scan</button>
         <button class="btn btn-outline" id="btn-gen-plans" disabled onclick="generateAllPlans()" title="Generate remediation plans for all open vulnerability findings">⚙ Generate Plans</button>
-        <button class="btn btn-outline" id="btn-analyze" disabled onclick="openModal('modal-analyze')">🔬 Analyze</button>
-        <button class="btn btn-outline" id="btn-dep-check" disabled onclick="runDepCheck()" title="Discover service dependencies and classify each finding">🔗 Dep Check</button>
+        <div class="header-btn-grp">
+          <button class="btn btn-outline" id="btn-analyze" disabled onclick="openModal('modal-analyze')">🔬 Analyze</button>
+          <span class="hbg-date" id="analyze-date-hint"></span>
+        </div>
+        <div class="header-btn-grp">
+          <button class="btn btn-outline" id="btn-dep-check" disabled onclick="runDepCheck()" title="Discover service dependencies and classify each finding">🔗 Dep Check</button>
+          <span class="hbg-date" id="dep-check-date-hint"></span>
+        </div>
         <button class="btn-icon" onclick="toggleTheme()" title="Toggle theme">◑</button>
         <button class="notif-btn" onclick="openPendingApprovals()">🔔<span class="notif-n" id="notif-n">0</span></button>
       </div>
@@ -343,6 +352,12 @@ a{color:var(--accent)}
       </button>
       <button class="tab-btn" id="tab-other" onclick="switchTab('other')">
         Others <span class="tab-count" id="cnt-other">0</span>
+      </button>
+      <button class="tab-btn" id="tab-remediated" onclick="switchTab('remediated')">
+        ✅ Remediated <span class="tab-count" id="cnt-remediated">0</span>
+      </button>
+      <button class="tab-btn" id="tab-deferred" onclick="switchTab('deferred')">
+        📋 Deferred <span class="tab-count" id="cnt-deferred">0</span>
       </button>
     </div>
 
@@ -440,6 +455,10 @@ a{color:var(--accent)}
       <div class="restore-section">
         <h3>↩ Restoration Plan <span style="font-size:12px;font-weight:400;color:var(--text2)">(auto-executed if smoke test fails)</span></h3>
         <div id="rem-restore-text" style="font-size:13px;color:var(--text2);line-height:1.6"></div>
+      </div>
+      <div class="plan-section" style="padding:10px 14px;margin-bottom:14px">
+        <h3 style="font-size:13px;margin-bottom:8px">⚙ Agent Remediation Workflow</h3>
+        <div id="rem-workflow-steps" class="wf-steps"></div>
       </div>
       <div class="warn-box">⚠ Clicking <strong>Approve &amp; Execute</strong> is the human-approval step. The Ansible playbook will patch the package, restart affected services, run a smoke test, and roll back automatically if the smoke test fails.</div>
     </div>
@@ -619,6 +638,12 @@ function updateNotifBadge() {
 // ── AIT selection ──────────────────────────────────────────────────────────
 async function selectAIT(aitId) {
   S.selectedAIT = aitId;
+  // Reset to the Vulnerabilities tab so each AIT starts with a clean view
+  S.activeTab = 'vulnerability';
+  S._analysisTriggeredFor = null;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  const vtab = document.getElementById('tab-vulnerability');
+  if (vtab) vtab.classList.add('active');
   renderSidebar();
   const app = S.apps.find(a=>a.ait_id===aitId);
   document.getElementById('ait-title').textContent = app ? `${app.ait_id} — ${app.name}` : aitId;
@@ -634,8 +659,11 @@ async function selectAIT(aitId) {
 
 async function refreshFindings() {
   if (!S.selectedAIT) return;
+  const _ait = S.selectedAIT; // capture before any await
   try {
-    S.findings = await api('GET',`/applications/${S.selectedAIT}/findings`);
+    const _findings = await api('GET',`/applications/${_ait}/findings`);
+    if (_ait !== S.selectedAIT) return; // AIT switched during the fetch — discard stale results
+    S.findings = _findings;
     S.stats = computeStatsFromFindings(S.findings);
     renderStats(); renderFindings();
     // Auto-trigger analysis when AI is on and findings have no analysis yet
@@ -695,6 +723,30 @@ function renderStats() {
   document.getElementById('cnt-eol').textContent = S.stats.eols ?? 0;
   document.getElementById('cnt-secret').textContent = S.stats.secrets ?? 0;
   document.getElementById('cnt-other').textContent = S.stats.others ?? 0;
+  document.getElementById('cnt-remediated').textContent = S.stats.remediated ?? 0;
+  document.getElementById('cnt-deferred').textContent = S.stats.deferred ?? 0;
+  updateLastDates();
+}
+
+function updateLastDates() {
+  const fmtDate = ts => {
+    if (!ts) return 'Never';
+    const d = new Date(ts);
+    return d.toLocaleDateString(undefined, {month:'short', day:'numeric'}) + ' ' +
+           d.toLocaleTimeString(undefined, {hour:'2-digit', minute:'2-digit'});
+  };
+  const withAnalysis = S.findings.filter(f => f.analysis_md && f.updated_at);
+  const lastAnalysis = withAnalysis.length
+    ? Math.max(...withAnalysis.map(f => new Date(f.updated_at).getTime()))
+    : null;
+  const withDep = S.findings.filter(f => f.dep_info && f.updated_at);
+  const lastDep = withDep.length
+    ? Math.max(...withDep.map(f => new Date(f.updated_at).getTime()))
+    : null;
+  const ah = document.getElementById('analyze-date-hint');
+  if (ah) ah.textContent = 'Last: ' + fmtDate(lastAnalysis);
+  const dh = document.getElementById('dep-check-date-hint');
+  if (dh) dh.textContent = 'Last: ' + fmtDate(lastDep);
 }
 
 // ── Tabs ───────────────────────────────────────────────────────────────────
@@ -710,11 +762,16 @@ function renderFindings() {
   const wrap = document.getElementById('findings-wrap');
   if (!S.selectedAIT) { wrap.innerHTML=emptyHtml('🛡','Select an Application','Choose an AIT from the sidebar'); return; }
 
-  let list = S.findings.filter(f =>
-    S.activeTab === 'other'
-      ? ['other','misconfig','license'].includes(f.category)
-      : f.category === S.activeTab
-  );
+  let list;
+  if (S.activeTab === 'remediated') {
+    list = S.findings.filter(f => f.status === 'remediated');
+  } else if (S.activeTab === 'deferred') {
+    list = S.findings.filter(f => f.status === 'deferred');
+  } else if (S.activeTab === 'other') {
+    list = S.findings.filter(f => ['other','misconfig','license'].includes(f.category));
+  } else {
+    list = S.findings.filter(f => f.category === S.activeTab);
+  }
 
   // Severity filter
   if (S.sevFilter) list = list.filter(f => f.severity === S.sevFilter);
@@ -732,7 +789,7 @@ function renderFindings() {
 
   if (!list.length) {
     const reason = S.searchQuery || S.sevFilter ? 'Try a different search term or filter' : 'Import a scan to populate this list';
-    const lbl = {vulnerability:'Vulnerabilities',npt:'NPT Findings',eol:'EOL Findings',secret:'Password Rotation Findings',other:'Other Findings'}[S.activeTab]||'Findings';
+    const lbl = {vulnerability:'Vulnerabilities',npt:'NPT Findings',eol:'EOL Findings',secret:'Password Rotation Findings',other:'Other Findings',remediated:'Remediated Findings',deferred:'Deferred Findings'}[S.activeTab]||'Findings';
     wrap.innerHTML = emptyHtml('✅', 'No ' + lbl, reason);
     return;
   }
@@ -937,7 +994,11 @@ function actionsHtml(f) {
     }
   }
 
-  return `${remBtn}${defBtn}${skipBtn}${rollBtn}`;
+  let reopenBtn = '';
+  if (f.status === 'deferred' || f.status === 'skipped') {
+    reopenBtn = `<span class="action-sep"></span><button class="btn btn-outline" onclick="reopenFinding(${f.id})">↺ Re-open</button>`;
+  }
+  return `${remBtn}${defBtn}${skipBtn}${rollBtn}${reopenBtn}`;
 }
 
 // ── Search / filter / view ─────────────────────────────────────────────────
@@ -1289,6 +1350,7 @@ function flatCveRowHtml(f) {
           const disabled = analysisRunning ? 'disabled' : '';
           return `<button class="btn btn-outline" style="font-size:12px;padding:4px 10px;margin-left:auto" ${disabled} onclick="reanalyzeGroup([${f.id}],event)">${label}</button>`;
         })()}
+        ${(f.status==='deferred'||f.status==='skipped')?`<button class="btn btn-outline" style="font-size:12px;padding:4px 10px" onclick="reopenFinding(${f.id});event.stopPropagation()">↺ Re-open</button>`:''}
       </div>
     </div>
   </div>`;
@@ -1343,6 +1405,7 @@ async function remediateGroup(ids) {
     <span class="k">Reboot required</span><span class="v">${p.reboot_required?'⚠ Yes':'No'}</span>
     <span class="k">Reason</span><span class="v">${esc(p.reason||'—')}</span>`;
   document.getElementById('rem-restore-text').textContent = p.restore_plan || 'dnf history undo last (automatic)';
+  _renderRemediateWorkflow(rep);
   openModal('modal-remediate');
 }
 
@@ -1368,10 +1431,39 @@ async function remediateFamily(sortedIds, family, event) {
     <span class="k">Reboot required</span><span class="v">${p.reboot_required?'⚠ Yes':'No'}</span>
     <span class="k">Reason</span><span class="v">${esc(p.reason||'—')}</span>`;
   document.getElementById('rem-restore-text').textContent = p.restore_plan || 'dnf history undo last (automatic)';
+  _renderRemediateWorkflow(rep);
   openModal('modal-remediate');
 }
 
 // ── Actions ────────────────────────────────────────────────────────────────
+function _renderRemediateWorkflow(f) {
+  const p = f?.plan;
+  const pkg = p?.package || f?.package || 'package';
+  const svcs = p?.services_to_restart || 'none';
+  const rollback = p?.restore_plan
+    ? p.restore_plan.substring(0, 150)
+    : `dnf history undo last — restores ${pkg} to prior installed version`;
+  const steps = [
+    {icon:'✅', title:'Plan Validated', desc:`Action: ${p?.action||'—'} · Package: ${pkg}${p?.reboot_required?' · ⚠ Reboot required':''}`, done:true},
+    {icon:'👤', title:'Human Approval', desc:'You are here — click Approve & Execute to proceed', pending:true},
+    {icon:'🤖', title:'Ansible Execution', desc:`ansible-playbook patch.yml -e pkg=${pkg} -e health_url=<HEALTH_URL>`, mono:true},
+    {icon:'🔁', title:'Service Restart', desc:`Services restarted after patch: ${svcs}`},
+    {icon:'🏥', title:'Smoke Test', desc:'HTTP health check — endpoint must return 2xx; failure triggers automatic rollback'},
+    {icon:'↩', title:'Auto-Rollback', desc:rollback},
+  ];
+  const stepsHtml = steps.map((s, i) => `
+    <div class="wf-step${s.pending?' wf-pending':''}">
+      <span class="wf-num">${i+1}</span>
+      <span class="wf-icon">${s.icon}</span>
+      <div class="wf-body">
+        <span class="wf-title">${s.title}</span>
+        <span class="wf-desc${s.mono?' wf-mono':''}">${esc(s.desc)}</span>
+      </div>
+    </div>`).join('');
+  const el = document.getElementById('rem-workflow-steps');
+  if (el) el.innerHTML = stepsHtml;
+}
+
 function showRemediateModal(fid) {
   const f = S.findings.find(x=>x.id===fid);
   if (!f||!f.plan) return toast('err','No plan available');
@@ -1385,6 +1477,7 @@ function showRemediateModal(fid) {
     <span class="k">Reboot required</span><span class="v">${p.reboot_required?'⚠ Yes':'No'}</span>
     <span class="k">Reason</span><span class="v">${esc(p.reason||'—')}</span>`;
   document.getElementById('rem-restore-text').textContent = p.restore_plan||'dnf history undo last (automatic)';
+  _renderRemediateWorkflow(f);
   openModal('modal-remediate');
 }
 
@@ -1427,10 +1520,11 @@ async function skipFinding(fid) {
 }
 
 async function reopenFinding(fid) {
-  // Set back to open by using a lightweight approach — defer then open via UI reload
-  // We don't have a dedicated reopen endpoint, so update status to open via skip toggle trick.
-  // For now, just re-import or use the generate-plan endpoint as a status reset.
-  toast('info','Reload the page or re-import the scan to re-open a rolled-back finding.');
+  try {
+    await api('POST', `/findings/${fid}/reopen`);
+    toast('ok', 'Finding re-opened');
+    await refreshFindings();
+  } catch(e) { toast('err', e.message); }
 }
 
 function showRollbackModal(fid) {
