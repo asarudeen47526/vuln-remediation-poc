@@ -100,8 +100,20 @@ a{color:var(--accent)}
 .dep-red{background:rgba(239,68,68,.15);color:#dc2626}
 .dep-blue{background:rgba(99,102,241,.15);color:#6366f1}
 .dep-grey{background:var(--surface2);color:var(--text3)}
-.dep-panel{background:var(--surface2);border-radius:6px;padding:10px 12px;font-size:12px;line-height:1.55;margin-top:2px}
-.dep-products{margin-top:4px;font-size:11px;color:var(--text2)}
+.dep-panel{border-radius:6px;padding:12px 14px;font-size:12px;line-height:1.55;margin-top:2px;border-left:3px solid transparent}
+.dep-panel-red{background:rgba(239,68,68,.07);border-left-color:#dc2626}
+.dep-panel-amber{background:rgba(245,158,11,.07);border-left-color:#b45309}
+.dep-panel-green{background:rgba(34,197,94,.07);border-left-color:#16a34a}
+.dep-panel-blue{background:rgba(99,102,241,.07);border-left-color:#6366f1}
+.dep-panel-grey{background:var(--surface2);border-left-color:var(--border)}
+.dep-note-text{font-size:12px;color:var(--text1);line-height:1.7;margin-top:6px}
+.dep-chips{margin-top:8px;display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.dep-chips-label{font-size:11px;color:var(--text2);margin-right:2px}
+.dep-chip{font-size:11px;font-weight:500;padding:2px 8px;border-radius:10px;border:1px solid var(--border);background:var(--surface2);color:var(--text1)}
+.dep-chip-red{background:rgba(239,68,68,.1);color:#dc2626;border-color:rgba(239,68,68,.25)}
+.dep-chip-amber{background:rgba(245,158,11,.1);color:#b45309;border-color:rgba(245,158,11,.25)}
+.dep-chip-green{background:rgba(34,197,94,.1);color:#16a34a;border-color:rgba(34,197,94,.25)}
+.dep-chip-blue{background:rgba(99,102,241,.1);color:#6366f1;border-color:rgba(99,102,241,.25)}
 .status-badge{font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;white-space:nowrap}
 .status-open{background:rgba(59,130,246,.15);color:var(--s-open)}
 .status-remediated{background:rgba(34,197,94,.15);color:var(--s-rem)}
@@ -1723,6 +1735,7 @@ async function runAnalysis() {
     }
     // Step 2: run LLM agent analysis
     await api('POST', `/applications/${S.selectedAIT}/analyze`);
+    startPoll();
     startAnalysisPoll();
   } catch(e) { toast('err', 'Analysis error: ' + e.message); }
 }
@@ -1779,14 +1792,18 @@ function depColHtml(f) {
   }
   const color = _DEP_COLORS[di.risk] || 'grey';
   const icon  = _DEP_ICONS[di.risk]  || '⬜';
-  const prods = di.products && di.products.length
-    ? `<div class="dep-products">Affects: <strong>${di.products.map(esc).join(', ')}</strong></div>`
+  const noteHtml = esc(di.note).replace(/\n/g, '<br>');
+  const chips = di.products && di.products.length
+    ? `<div class="dep-chips">
+        <span class="dep-chips-label">Used by:</span>
+        ${di.products.map(p => `<span class="dep-chip dep-chip-${color}">${esc(p)}</span>`).join('')}
+       </div>`
     : '';
   return `<div class="col-label">Dependency Risk</div>
-  <div class="dep-panel">
-    <div style="margin-bottom:6px"><span class="dep-badge dep-${color}">${icon} ${esc(di.label)}</span></div>
-    <div style="font-size:12px;color:var(--text1)">${esc(di.note)}</div>
-    ${prods}
+  <div class="dep-panel dep-panel-${color}">
+    <span class="dep-badge dep-${color}">${icon} ${esc(di.label)}</span>
+    <div class="dep-note-text">${noteHtml}</div>
+    ${chips}
   </div>`;
 }
 
