@@ -666,7 +666,6 @@ async function selectAIT(aitId) {
   document.getElementById('analyze-ait-label').textContent = aitId;
   document.getElementById('filter-bar').style.display = '';
   await refreshFindings();
-  startPoll();
 }
 
 async function refreshFindings() {
@@ -959,7 +958,7 @@ function analysisColHtml(f) {
 }
 
 function planColHtml(f) {
-  if (f.plan_status==='pending') return `<div class="col-label">Remediation Plan</div><div class="plan-loading"><span class="spinner"></span> Generating… <span style="font-size:11px;color:var(--text3)">(LLM call in progress)</span></div>`;
+  if (f.plan_status==='pending') return `<div class="col-label">Remediation Plan</div><div class="no-data"><span style="font-size:12px;color:var(--text2)">Plan not yet generated — click <strong>🔬 Analyze</strong> to generate</span></div>`;
   if (f.plan_status==='na') { const adv=f.plan?.plan_error||'No fix available.'; return `<div class="col-label">Remediation Plan</div><div class="no-data"><span style="font-size:12px;color:var(--text2);line-height:1.5">${esc(adv)}</span></div>`; }
   if (f.plan_status==='error') return `<div class="col-label">Remediation Plan</div><div class="plan-error">⚠ ${esc(f.plan?.plan_error||'error')}<br><button class="link-btn" onclick="retryPlan(${f.id})">Retry</button></div>`;
   if (!f.plan) return `<div class="col-label">Remediation Plan</div><div class="no-data">No plan yet<br><button class="link-btn" onclick="retryPlan(${f.id})">Generate</button></div>`;
@@ -1262,7 +1261,7 @@ function workflowHtml(f) {
     if (f.plan_status === 'ready' && p) {
       steps.push({icon:'✅', title:'Plan Validated', desc:`Action: ${p.action||'—'} · Package: ${p.package||f.package}${p.reboot_required?' · ⚠ Reboot required':''}`});
     } else if (f.plan_status === 'pending') {
-      steps.push({icon:'⏳', title:'Plan Generation', desc:'LLM is generating the Ansible remediation plan…', pending:true});
+      steps.push({icon:'⏳', title:'Plan Generation', desc:'Plan not yet generated — click 🔬 Analyze to generate.', pending:true});
     } else if (f.plan_status === 'error') {
       steps.push({icon:'⚠', title:'Plan Error', desc:p?.plan_error||'Plan generation failed — click Retry.', err:true});
     } else {
@@ -1930,10 +1929,8 @@ async function importScan() {
       if (aitVal !== S.selectedAIT) await selectAIT(aitVal);
     }
     closeModal(); clearFile();
-    toast('ok', `Imported ${r.imported} finding(s) for ${r.ait_id}. Analysis & plans generating…`);
+    toast('ok', `Imported ${r.imported} finding(s) for ${r.ait_id}. Click 🔬 Analyze to generate plans + analysis.`);
     await refreshFindings();
-    startPoll();
-    startAnalysisPoll();
   } catch(e) { toast('err', 'Import failed: ' + e.message); }
   finally {
     document.getElementById('btn-import-submit').disabled = false;
